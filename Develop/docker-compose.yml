@@ -1,0 +1,74 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ssp-nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ../Application:/var/www/html:ro
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - php
+    networks:
+      - ssp-net
+    restart: unless-stopped
+
+  php:
+    build:
+      context: ./php
+      dockerfile: Dockerfile
+    container_name: ssp-php
+    volumes:
+      - ../Application:/var/www/html
+      - ./php/php.ini:/usr/local/etc/php/conf.d/zz-custom.ini:ro
+      - ./php/www.conf:/usr/local/etc/php-fpm.d/zz-www.conf:ro
+    environment:
+      TZ: Asia/Tokyo
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - ssp-net
+    restart: unless-stopped
+
+  mariadb:
+    image: mariadb:11.4
+    container_name: ssp-mariadb
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ssp}
+      MYSQL_USER: ${MYSQL_USER:-ssp}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sspsecret}
+      TZ: Asia/Tokyo
+    volumes:
+      - ssp-mariadb-data:/var/lib/mysql
+      - ./mariadb/my.cnf:/etc/mysql/conf.d/zz-custom.cnf:ro
+      - ./mariadb/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - ssp-net
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: ssp-mailpit
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    networks:
+      - ssp-net
+    restart: unless-stopped
+
+networks:
+  ssp-net:
+    driver: bridge
+
+volumes:
+  ssp-mariadb-data:

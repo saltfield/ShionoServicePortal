@@ -1,0 +1,23 @@
+<?php
+
+namespace App\Domains\Contract\Enums;
+
+enum ContractStatus: string
+{
+    case Draft = 'draft';
+    case PendingPriceApproval = 'pending_price_approval';
+    case Approved = 'approved';
+    case Activated = 'activated';
+    case Cancelled = 'cancelled';
+
+    public function label(): string
+    {
+        return match ($this) {
+            self::Draft => '下書き',
+            self::PendingPriceApproval => '価格承認待ち',
+            self::Approved => '承認済',
+            self::Activated => '開通済',
+            self::Cancelled => '取消',
+        };
+    }
+}

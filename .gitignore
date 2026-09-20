@@ -1,0 +1,23 @@
+/.env
+**/.env
+Develop/.env
+
+# Laravel (Phase 2+)
+Application/vendor/
+Application/node_modules/
+Application/public/storage
+Application/storage/*.key
+Application/storage/logs/*
+Application/storage/framework/cache/*
+Application/storage/framework/sessions/*
+Application/storage/framework/views/*
+Application/.phpunit.result.cache
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Docker
+Develop/mariadb-data/
