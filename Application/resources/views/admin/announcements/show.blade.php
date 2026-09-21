@@ -7,9 +7,20 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb small mb-2">
+            <li class="breadcrumb-item"><a href="{{ route(($routePrefix ?? 'admin').'.announcements.index') }}">お知らせ</a></li>
+            <li class="breadcrumb-item active" aria-current="page">お知らせ詳細</li>
+        </ol>
+    </nav>
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h3 mb-0">{{ $announcement->title }}</h1>
-        <a href="{{ route(($routePrefix ?? 'admin').'.announcements.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
+        <div class="d-flex gap-2">
+            @if ($canManage ?? false)
+                <a href="{{ route(($routePrefix ?? 'admin').'.announcements.edit', $announcement) }}" class="btn btn-primary btn-sm">編集</a>
+            @endif
+            <a href="{{ route(($routePrefix ?? 'admin').'.announcements.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
+        </div>
     </div>
     @if (session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>
@@ -19,7 +30,17 @@
     @endif
 
     <p class="text-muted small mb-3">
-        公開: {{ $announcement->published_at?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}
+        公開開始: {{ $announcement->published_at?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}
+        ／ 公開終了:
+        {{ $announcement->expires_at ? $announcement->expires_at->timezone(config('app.timezone'))->format('Y-m-d H:i') : '無期限' }}
+        ／ 新規登録への配信: {{ $announcement->include_new_registrations ? 'する' : 'しない' }}
+    </p>
+    <p class="text-muted small mb-3">
+        配信先:
+        @foreach ($announcement->targets as $target)
+            {{ $target->target_type->label() }}@if ($target->target_id)#{{ $target->target_id }}@endif
+            @if (! $loop->last)、@endif
+        @endforeach
     </p>
     <div class="mb-4" style="white-space: pre-wrap;">{{ $announcement->body }}</div>
 

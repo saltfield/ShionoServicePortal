@@ -10,6 +10,7 @@ class ItemDocument extends Model
 {
     protected $fillable = [
         'item_id',
+        'owning_bp_id',
         'title',
         'file_path',
         'original_name',
@@ -20,6 +21,11 @@ class ItemDocument extends Model
     public function item(): BelongsTo
     {
         return $this->belongsTo(Item::class);
+    }
+
+    public function owningBp(): BelongsTo
+    {
+        return $this->belongsTo(BusinessPartner::class, 'owning_bp_id');
     }
 
     public function contractDocuments(): HasMany

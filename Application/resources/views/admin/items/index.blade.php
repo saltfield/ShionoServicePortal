@@ -10,10 +10,16 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h3 mb-0">品目一覧</h1>
         <div class="d-flex gap-2">
-            @unless ($readOnly ?? false)
-                <a href="{{ route('admin.items.create') }}" class="btn btn-primary btn-sm">新規作成</a>
-            @endunless
-            <a href="{{ route(($routePrefix ?? 'admin').'.dashboard') }}" class="btn btn-outline-secondary btn-sm">ダッシュボード</a>
+            @php
+                $prefix = $routePrefix ?? 'admin';
+                $allowCreate = $prefix === 'admin' || ($canCreate ?? false);
+            @endphp
+            @if ($allowCreate)
+                <a href="{{ route($prefix.'.items.create') }}" class="btn btn-primary btn-sm">
+                    {{ $prefix === 'bp' ? '独自サービス作成' : '新規作成' }}
+                </a>
+            @endif
+            <a href="{{ route($prefix.'.dashboard') }}" class="btn btn-outline-secondary btn-sm">ダッシュボード</a>
         </div>
     </div>
 
@@ -27,6 +33,9 @@
                 <tr>
                     <th>コード</th>
                     <th>名称</th>
+                    @if ($showOwnership ?? false)
+                        <th>種別</th>
+                    @endif
                     <th>区分</th>
                     <th>必須セット</th>
                     <th>仕切り（税別）</th>
@@ -42,10 +51,19 @@
                             @if ($readOnly ?? false)
                                 <code>{{ $item->code }}</code>
                             @else
-                                <a href="{{ route('admin.items.show', $item) }}"><code>{{ $item->code }}</code></a>
+                                <a href="{{ route(($routePrefix ?? 'admin').'.items.show', $item) }}"><code>{{ $item->code }}</code></a>
                             @endif
                         </td>
                         <td>{{ $item->name }}</td>
+                        @if ($showOwnership ?? false)
+                            <td>
+                                @if ($item->owning_bp_id === null)
+                                    <span class="badge text-bg-secondary">標準</span>
+                                @else
+                                    <span class="badge text-bg-info">独自</span>
+                                @endif
+                            </td>
+                        @endif
                         <td>{{ $item->billing_type->label() }}</td>
                         <td>{{ $item->requiredItem ? $item->requiredItem->code : '—' }}</td>
                         <td>@include('partials.price-display', ['amount' => $item->partition_price, 'taxRate' => $item->tax_rate])</td>
@@ -54,7 +72,7 @@
                         <td>{{ $item->is_active ? '有効' : '無効' }}</td>
                     </tr>
                 @empty
-                    <tr><td colspan="8" class="text-muted">品目がありません。</td></tr>
+                    <tr><td colspan="{{ ($showOwnership ?? false) ? 9 : 8 }}" class="text-muted">品目がありません。</td></tr>
                 @endforelse
             </tbody>
         </table>

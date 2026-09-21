@@ -84,7 +84,7 @@ class DemoUserSeeder extends Seeder
 
         $rbac->assignRole($admin, 'system_admin', RoleScope::System);
         $rbac->assignRole($bpUser, 'bp_owner', RoleScope::Bp, $partner->id);
-        $rbac->assignRole($customerUser, 'customer_member', RoleScope::Customer, $customer->id);
+        $rbac->assignRole($customerUser, 'customer_owner', RoleScope::Customer, $customer->id);
 
         $this->command?->info('Demo users ready.');
         $this->command?->table(
@@ -92,7 +92,7 @@ class DemoUserSeeder extends Seeder
             [
                 ['管理者', '/admin/login', 'ADMIN001', '（不要）', 'Password123!', 'system_admin'],
                 ['BP', '/bp/login', 'BPUSER001', $partner->code, 'Password123!', 'bp_owner'],
-                ['カスタマー', '/customer/login', 'CUSUSER001', $customer->code, 'Password123!', 'customer_member'],
+                ['カスタマー', '/customer/login', 'CUSUSER001', $customer->code, 'Password123!', 'customer_owner'],
             ]
         );
     }

@@ -2,72 +2,70 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Iam\Services\RbacService;
+use App\Domains\Support\Enums\InquiryStatus;
 use App\Domains\Support\Services\InquiryService;
 use App\Http\Controllers\Concerns\ConfirmsInquiryDeletion;
+use App\Http\Controllers\Concerns\DownloadsInquiryAttachment;
+use App\Http\Controllers\Concerns\ListsTickets;
 use App\Http\Controllers\Controller;
-use App\Models\BusinessPartner;
-use App\Models\Customer;
 use App\Models\Inquiry;
+use App\Models\InquiryMessageAttachment;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class InquiryController extends Controller
 {
     use ConfirmsInquiryDeletion;
+    use DownloadsInquiryAttachment;
+    use ListsTickets;
 
-    public function index(Request $request, InquiryService $service, RbacService $rbac): View
+    public function received(Request $request, InquiryService $service, RbacService $rbac): View
     {
         $actor = $request->user('admin');
         abort_unless($rbac->hasPermission($actor, 'inquiry.view'), 403);
+        $filters = $this->ticketListFilters($request);
 
-        $inquiries = $service->visibleQuery($actor)->latest('updated_at')->paginate(20);
-
-        return view('admin.inquiries.index', [
-            'inquiries' => $inquiries,
+        return view('admin.tickets.index', [
+            'inquiries' => $this->paginateTicketList($request, $service, $actor, 'received'),
             'routePrefix' => 'admin',
+            'listMode' => 'received',
+            'pageTitle' => '受領チケット',
+            'filters' => $filters,
         ]);
     }
 
-    public function create(Request $request, RbacService $rbac): View
+    public function inspect(Request $request, Inquiry $inquiry, InquiryService $service, RbacService $rbac): View
     {
-        abort_unless($rbac->hasPermission($request->user('admin'), 'inquiry.reply'), 403);
+        $actor = $request->user('admin');
+        abort_unless($rbac->hasPermission($actor, 'inquiry.view'), 403);
+        $service->assertAdminInspectable($actor, $inquiry);
 
-        return view('admin.inquiries.create', [
-            'routePrefix' => 'admin',
-            'customers' => Customer::query()->orderBy('code')->get(),
-            'businessPartners' => BusinessPartner::query()->orderBy('code')->get(),
-        ]);
-    }
-
-    public function store(Request $request, InquiryService $service): RedirectResponse
-    {
-        $validated = $request->validate([
-            'subject' => ['required', 'string', 'max:255'],
-            'body' => ['required', 'string', 'max:5000'],
-            'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
-            'owning_bp_id' => ['nullable', 'integer', 'exists:business_partners,id'],
-        ]);
-
-        try {
-            $inquiry = $service->open(
-                $request->user('admin'),
-                $validated['subject'],
-                $validated['body'],
-                isset($validated['customer_id']) ? Customer::query()->find($validated['customer_id']) : null,
-                isset($validated['owning_bp_id']) ? BusinessPartner::query()->find($validated['owning_bp_id']) : null,
-            );
-        } catch (InvalidArgumentException $exception) {
-            throw ValidationException::withMessages(['subject' => $exception->getMessage()]);
+        $backUrl = null;
+        $backLabel = null;
+        if ($request->filled('return_bp_id')) {
+            $backUrl = route('admin.business-partners.show', [
+                'businessPartner' => (int) $request->input('return_bp_id'),
+                'tab' => 'tickets',
+            ]);
+            $backLabel = 'BP詳細（チケット）';
+        } elseif ($request->filled('return_customer_id')) {
+            $backUrl = route('admin.customers.show', [
+                'customer' => (int) $request->input('return_customer_id'),
+                'tab' => 'tickets',
+            ]);
+            $backLabel = 'カスタマー詳細（チケット）';
         }
 
-        return redirect()
-            ->route('admin.inquiries.show', $inquiry)
-            ->with('status', '問い合わせを作成しました。');
+        return view('admin.tickets.inspect', [
+            'inquiry' => $inquiry->load(['customer', 'assigneeBp', 'issuerBp', 'openedBy']),
+            'backUrl' => $backUrl,
+            'backLabel' => $backLabel,
+        ]);
     }
 
     public function show(Request $request, Inquiry $inquiry, InquiryService $service, RbacService $rbac): View
@@ -75,21 +73,48 @@ class InquiryController extends Controller
         $actor = $request->user('admin');
         abort_unless($rbac->hasPermission($actor, 'inquiry.view'), 403);
         $service->assertVisible($actor, $inquiry);
+        $service->markRead($actor, $inquiry);
 
-        return view('admin.inquiries.show', [
-            'inquiry' => $inquiry->load(['customer', 'owningBp', 'openedBy']),
+        $isAssignee = $service->isAssigneeSide($actor, $inquiry);
+
+        return view('admin.tickets.show', [
+            'inquiry' => $inquiry->load(['customer', 'assigneeBp', 'issuerBp', 'openedBy']),
             'routePrefix' => 'admin',
+            'listMode' => 'received',
             'deleteConfirmationCode' => $this->issueInquiryDeleteConfirmationCode($inquiry),
-            'canClose' => $rbac->hasPermission($actor, 'inquiry.close'),
-            'canReopen' => $rbac->hasPermission($actor, 'inquiry.reopen'),
+            'canStartProgress' => $isAssignee
+                && $rbac->hasPermission($actor, 'inquiry.reply')
+                && $inquiry->status === InquiryStatus::Submitted,
+            'canClose' => $isAssignee
+                && $rbac->hasPermission($actor, 'inquiry.close')
+                && $inquiry->status === InquiryStatus::InProgress,
+            'canReopen' => $isAssignee
+                && $rbac->hasPermission($actor, 'inquiry.reopen')
+                && $inquiry->status === InquiryStatus::Closed,
+            'canWithdraw' => false,
         ]);
+    }
+
+    public function startProgress(Request $request, Inquiry $inquiry, InquiryService $service): RedirectResponse
+    {
+        try {
+            $service->startProgress($request->user('admin'), $inquiry);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['inquiry' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', '受領対応を開始しました。');
     }
 
     public function close(Request $request, Inquiry $inquiry, InquiryService $service): RedirectResponse
     {
-        $service->close($request->user('admin'), $inquiry);
+        try {
+            $service->close($request->user('admin'), $inquiry);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['inquiry' => $exception->getMessage()]);
+        }
 
-        return back()->with('status', '問い合わせをクローズしました。');
+        return back()->with('status', 'チケットをクローズしました。');
     }
 
     public function reopen(Request $request, Inquiry $inquiry, InquiryService $service): RedirectResponse
@@ -100,7 +125,7 @@ class InquiryController extends Controller
             throw ValidationException::withMessages(['inquiry' => $exception->getMessage()]);
         }
 
-        return back()->with('status', '問い合わせを再オープンしました。');
+        return back()->with('status', 'チケットを再オープンしました。');
     }
 
     public function destroy(Request $request, Inquiry $inquiry, InquiryService $service): RedirectResponse
@@ -109,7 +134,16 @@ class InquiryController extends Controller
         $service->delete($request->user('admin'), $inquiry);
 
         return redirect()
-            ->route('admin.inquiries.index')
-            ->with('status', '問い合わせを削除しました。');
+            ->route('admin.tickets.received')
+            ->with('status', 'チケットを削除しました。');
+    }
+
+    public function downloadAttachment(
+        Request $request,
+        Inquiry $inquiry,
+        InquiryMessageAttachment $attachment,
+        InquiryService $service,
+    ): StreamedResponse {
+        return $this->streamInquiryAttachment($request->user('admin'), $inquiry, $attachment, $service);
     }
 }

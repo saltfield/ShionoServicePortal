@@ -52,8 +52,14 @@
             </thead>
             <tbody>
             @forelse ($partners as $partner)
-                <tr>
-                    <td><code>{{ $partner->code }}</code></td>
+                @php $isSelf = isset($selfBpId) && (int) $partner->id === (int) $selfBpId; @endphp
+                <tr class="{{ $isSelf ? 'table-primary' : '' }}">
+                    <td>
+                        <code>{{ $partner->code }}</code>
+                        @if ($isSelf)
+                            <span class="badge text-bg-primary ms-1">自BP</span>
+                        @endif
+                    </td>
                     <td>{{ $partner->name }}</td>
                     <td>{{ $partner->depth }}</td>
                     <td>{{ $partner->parent?->code ?? '-' }}</td>

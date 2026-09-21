@@ -78,7 +78,7 @@ function billingFixture(): array
     $contract = $contracts->createDraft($bpUser, $site, [$initial->id, $running->id]);
     $app = $contracts->submitPriceApproval($bpUser, $contract);
     $contracts->decidePriceApproval($parentUser, $app, true);
-    $contracts->activate($bpUser, $contract->fresh());
+    $contracts->activate($bpUser, $contract->fresh(), $contract->fresh()->applied_at?->format('Ym') ?: now()->format('Ym'));
 
     return [
         'admin' => $admin,

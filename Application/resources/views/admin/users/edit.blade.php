@@ -6,13 +6,48 @@
 @endsection
 
 @section('content')
+    @php
+        $prefix = $routePrefix ?? 'admin';
+        if ($returnCustomerId ?? null) {
+            $backUrl = route($prefix.'.customers.show', ['customer' => $returnCustomerId, 'tab' => 'users']);
+            $crumbs = [
+                ['label' => 'カスタマー詳細', 'url' => route($prefix.'.customers.show', $returnCustomerId)],
+                ['label' => 'ユーザー管理', 'url' => $backUrl],
+            ];
+        } elseif ($returnBpId ?? null) {
+            $backUrl = route($prefix.'.business-partners.show', ['businessPartner' => $returnBpId, 'tab' => 'users']);
+            $crumbs = [
+                ['label' => 'BP詳細', 'url' => route($prefix.'.business-partners.show', $returnBpId)],
+                ['label' => 'ユーザー管理', 'url' => $backUrl],
+            ];
+        } else {
+            $backUrl = route($prefix.'.users.index', $prefix === 'bp' ? [] : ['tab' => $managedUser->user_type->value]);
+            $crumbs = [
+                ['label' => 'ユーザー管理', 'url' => $backUrl],
+            ];
+        }
+    @endphp
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb small mb-2">
+            @foreach ($crumbs as $crumb)
+                <li class="breadcrumb-item"><a href="{{ $crumb['url'] }}">{{ $crumb['label'] }}</a></li>
+            @endforeach
+            <li class="breadcrumb-item active" aria-current="page">ユーザー編集</li>
+        </ol>
+    </nav>
     <h1 class="h3 mb-3">ユーザー編集</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif
-    <form method="POST" action="{{ route(($routePrefix ?? 'admin').'.users.update', $managedUser) }}" class="card card-body mb-4" style="max-width:40rem">
+    <form method="POST" action="{{ route($prefix.'.users.update', $managedUser) }}" class="card card-body mb-4" style="max-width:40rem">
         @csrf
         @method('PUT')
+        @if ($returnCustomerId ?? null)
+            <input type="hidden" name="return_customer_id" value="{{ $returnCustomerId }}">
+        @endif
+        @if ($returnBpId ?? null)
+            <input type="hidden" name="return_bp_id" value="{{ $returnBpId }}">
+        @endif
         <div class="mb-3">
             <label class="form-label">ログインID</label>
             <input type="text" class="form-control" value="{{ $managedUser->login_id }}" disabled>
@@ -54,15 +89,25 @@
             <label class="form-check-label" for="is_active">有効</label>
         </div>
         <button class="btn btn-primary" type="submit">保存</button>
-        <a href="{{ route(($routePrefix ?? 'admin').'.users.index', ['tab' => $managedUser->user_type->value]) }}" class="btn btn-link">一覧へ</a>
     </form>
 
+    <div class="d-flex gap-2">
+        @if ($deleteConfirmationCode ?? null)
+            <button type="button" class="btn btn-outline-danger btn-sm" id="userDeleteOpen">削除</button>
+        @endif
+        <a href="{{ $backUrl }}" class="btn btn-outline-secondary btn-sm">キャンセル</a>
+    </div>
     @if ($deleteConfirmationCode ?? null)
-        <button type="button" class="btn btn-outline-danger btn-sm" id="userDeleteOpen">削除</button>
         <dialog id="userDeleteDialog" class="border-0 rounded-3 shadow p-0" style="max-width: 28rem; width: calc(100% - 2rem);">
-            <form method="POST" action="{{ route(($routePrefix ?? 'admin').'.users.destroy', $managedUser) }}" class="p-4">
+            <form method="POST" action="{{ route($prefix.'.users.destroy', $managedUser) }}" class="p-4">
                 @csrf
                 @method('DELETE')
+                @if ($returnCustomerId ?? null)
+                    <input type="hidden" name="return_customer_id" value="{{ $returnCustomerId }}">
+                @endif
+                @if ($returnBpId ?? null)
+                    <input type="hidden" name="return_bp_id" value="{{ $returnBpId }}">
+                @endif
                 <h2 class="h5 mb-3">ユーザー削除の確認</h2>
                 <p class="mb-2">「{{ $managedUser->login_id }}」を削除します。</p>
                 <p class="mb-3">下の確認コードを入力してください。</p>

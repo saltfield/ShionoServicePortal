@@ -10,21 +10,32 @@
         $prefix = $routePrefix ?? 'admin';
         $hideAdminTab = $hideAdminTab ?? false;
         $hidePrivilegeActions = $hidePrivilegeActions ?? false;
+        $selfBpOnly = $selfBpOnly ?? false;
+        $actorBp = $actorBp ?? null;
         $tabs = [];
-        if (! $hideAdminTab) {
-            $tabs['admin'] = '管理者';
+        if (! $selfBpOnly) {
+            if (! $hideAdminTab) {
+                $tabs['admin'] = '管理者';
+            }
+            $tabs['bp'] = 'BP';
+            $tabs['customer'] = 'カスタマー';
         }
-        $tabs['bp'] = 'BP';
-        $tabs['customer'] = 'カスタマー';
         $isBpTab = $tab === 'bp';
         $isCustomerTab = $tab === 'customer';
-        $showCustomerList = ! $isCustomerTab || $filters['managing_bp_id'] || $prefix === 'bp';
+        $showCustomerList = true;
     @endphp
 
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">ユーザー管理</h1>
+        <div>
+            <h1 class="h3 mb-0">ユーザー管理</h1>
+            @if ($selfBpOnly && $actorBp)
+                <p class="text-muted small mb-0 mt-1">自BP（<code>{{ $actorBp->code }}</code> / {{ $actorBp->name }}）のユーザーのみ</p>
+            @endif
+        </div>
         <div class="d-flex gap-2">
-            @if ($isBpTab)
+            @if ($selfBpOnly)
+                <a href="{{ route($prefix.'.users.create', ['type' => 'bp']) }}" class="btn btn-primary btn-sm">新規作成</a>
+            @elseif ($isBpTab)
                 <a href="{{ route($prefix.'.users.create', ['type' => 'bp']) }}" class="btn btn-primary btn-sm">新規作成</a>
             @elseif ($isCustomerTab)
                 <a href="{{ route($prefix.'.users.create', ['type' => 'customer']) }}" class="btn btn-primary btn-sm">新規作成</a>
@@ -41,6 +52,7 @@
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif
 
+    @if ($tabs !== [])
     <ul class="nav nav-tabs mb-3">
         @foreach ($tabs as $key => $label)
             <li class="nav-item">
@@ -51,6 +63,7 @@
             </li>
         @endforeach
     </ul>
+    @endif
 
     @if ($isBpTab && $prefix === 'admin')
         <form method="GET" action="{{ route($prefix.'.users.index') }}" class="row g-2 align-items-end mb-3">
@@ -72,9 +85,9 @@
         <form method="GET" action="{{ route($prefix.'.users.index') }}" class="row g-2 align-items-end mb-3">
             <input type="hidden" name="tab" value="customer">
             <div class="col-md-4">
-                <label for="managing_bp_id" class="form-label small mb-1">管理BP <span class="text-danger">*</span></label>
-                <select id="managing_bp_id" name="managing_bp_id" class="form-select form-select-sm" required>
-                    <option value="">選択してください</option>
+                <label for="managing_bp_id" class="form-label small mb-1">管理BP</label>
+                <select id="managing_bp_id" name="managing_bp_id" class="form-select form-select-sm">
+                    <option value="">すべて</option>
                     @foreach ($managingPartners as $partner)
                         <option value="{{ $partner->id }}" @selected((int) $filters['managing_bp_id'] === $partner->id)>
                             {{ $partner->code }} / {{ $partner->name }}
@@ -84,20 +97,17 @@
             </div>
             <div class="col-md-2">
                 <label for="cn" class="form-label small mb-1">CN</label>
-                <input type="text" id="cn" name="cn" value="{{ $filters['cn'] }}" class="form-control form-control-sm" placeholder="例: CN202609" @disabled(! $filters['managing_bp_id'])>
+                <input type="text" id="cn" name="cn" value="{{ $filters['cn'] }}" class="form-control form-control-sm" placeholder="例: CN202609">
             </div>
             <div class="col-md-3">
                 <label for="cn_name" class="form-label small mb-1">カスタマー名</label>
-                <input type="text" id="cn_name" name="cn_name" value="{{ $filters['cn_name'] }}" class="form-control form-control-sm" placeholder="部分一致" @disabled(! $filters['managing_bp_id'])>
+                <input type="text" id="cn_name" name="cn_name" value="{{ $filters['cn_name'] }}" class="form-control form-control-sm" placeholder="部分一致">
             </div>
             <div class="col-auto">
                 <button type="submit" class="btn btn-primary btn-sm">表示</button>
                 <a href="{{ route($prefix.'.users.index', ['tab' => 'customer']) }}" class="btn btn-outline-secondary btn-sm">クリア</a>
             </div>
         </form>
-        @unless ($filters['managing_bp_id'])
-            <p class="text-muted small mb-3">管理BPを選択すると、配下のカスタマーユーザーが表示されます。</p>
-        @endunless
     @endif
 
     @if ($showCustomerList)
@@ -107,7 +117,7 @@
             <tr>
                 <th>ログインID</th>
                 <th>氏名</th>
-                @if ($isBpTab)
+                @if ($isBpTab && ! ($selfBpOnly ?? false))
                     <th>BPN</th>
                     <th>BP名</th>
                 @elseif ($isCustomerTab)
@@ -136,7 +146,7 @@
                 <tr>
                     <td><code>{{ $user->login_id }}</code></td>
                     <td>{{ $user->name }}</td>
-                    @if ($isBpTab)
+                    @if ($isBpTab && ! ($selfBpOnly ?? false))
                         <td>{{ $orgCode }}</td>
                         <td>{{ $orgName }}</td>
                     @elseif ($isCustomerTab)
@@ -215,7 +225,7 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="{{ $isCustomerTab ? 10 : ($isBpTab ? 9 : 7) }}" class="text-muted text-center py-4">該当するユーザーがありません。</td>
+                    <td colspan="{{ $isCustomerTab ? 10 : (($isBpTab && ! ($selfBpOnly ?? false)) ? 9 : 7) }}" class="text-muted text-center py-4">該当するユーザーがありません。</td>
                 </tr>
             @endforelse
             </tbody>

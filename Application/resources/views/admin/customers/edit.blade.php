@@ -26,7 +26,7 @@
             <label class="form-label" for="entity_type">区分</label>
             <select name="entity_type" id="entity_type" class="form-select" required>
                 @foreach ($entityTypes as $type)
-                    <option value="{{ $type->value }}" @selected(old('entity_type', $customer->entity_type?->value) === $type->value)>{{ $type->value }}</option>
+                    <option value="{{ $type->value }}" @selected(old('entity_type', $customer->entity_type?->value) === $type->value)>{{ $type->label() }}</option>
                 @endforeach
             </select>
         </div>
@@ -34,7 +34,7 @@
             <label class="form-label" for="two_factor_mode">2FAモード</label>
             <select name="two_factor_mode" id="two_factor_mode" class="form-select" required>
                 @foreach ($modes as $mode)
-                    <option value="{{ $mode->value }}" @selected(old('two_factor_mode', $customer->two_factor_mode?->value) === $mode->value)>{{ $mode->value }}</option>
+                    <option value="{{ $mode->value }}" @selected(old('two_factor_mode', $customer->two_factor_mode?->value) === $mode->value)>{{ $mode->label() }}</option>
                 @endforeach
             </select>
         </div>

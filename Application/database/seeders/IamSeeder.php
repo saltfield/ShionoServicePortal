@@ -85,6 +85,15 @@ class IamSeeder extends Seeder
                     'customer.view', 'inquiry.view', 'inquiry.reply', 'inquiry.close', 'inquiry.reopen',
                 ],
             ],
+            'customer_owner' => [
+                'name' => 'カスタマー責任者',
+                'scope' => 'customer',
+                'description' => '自CNのユーザー管理・契約・請求・問い合わせ',
+                'permissions' => [
+                    'iam.user.manage',
+                    'contract.view', 'invoice.view', 'inquiry.view', 'inquiry.reply',
+                ],
+            ],
             'customer_member' => [
                 'name' => 'カスタマーメンバー',
                 'scope' => 'customer',

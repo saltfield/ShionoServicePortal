@@ -8,10 +8,10 @@
 
     <div class="row g-3">
         <div class="col-md-3">
-            <a href="{{ route('admin.inquiries.index') }}" class="text-decoration-none text-dark">
+            <a href="{{ route('admin.tickets.received') }}" class="text-decoration-none text-dark">
                 <div class="border rounded p-3 bg-white h-100">
-                    <div class="small text-muted">オープン問い合わせ</div>
-                    <div class="fs-4">{{ $openInquiryCount }}</div>
+                    <div class="small text-muted">未読チケット</div>
+                    <div class="fs-4">{{ $unreadTicketCount }}</div>
                 </div>
             </a>
         </div>

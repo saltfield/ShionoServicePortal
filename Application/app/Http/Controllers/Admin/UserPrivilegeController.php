@@ -50,14 +50,10 @@ class UserPrivilegeController extends Controller
                 $query->whereHas('businessPartner', fn ($bp) => $bp->where('name', 'like', "%{$bpName}%"));
             })
             ->when($userType === UserType::Customer, function ($query) use ($managingBpId, $cn, $cnName) {
-                if ($managingBpId === null) {
-                    $query->whereRaw('1 = 0');
-
-                    return;
-                }
-
                 $query->whereHas('customer', function ($customer) use ($managingBpId, $cn, $cnName) {
-                    $customer->where('managing_bp_id', $managingBpId);
+                    if ($managingBpId !== null) {
+                        $customer->where('managing_bp_id', $managingBpId);
+                    }
 
                     if ($cn !== '') {
                         $normalized = IdentifierNormalizer::normalize($cn);
@@ -104,13 +100,25 @@ class UserPrivilegeController extends Controller
         $actor = $request->user('admin');
         $authorization->authorize($actor, 'iam.user.manage');
         $type = UserType::from($request->input('type', UserType::Admin->value));
+        $selectedCustomerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
+        $returnCustomerId = $request->filled('return_customer_id') ? (int) $request->input('return_customer_id') : $selectedCustomerId;
+        $returnBpId = $request->filled('return_bp_id') ? (int) $request->input('return_bp_id') : null;
+        $partners = BusinessPartner::query()->orderBy('code')->get(['id', 'code', 'name']);
+        if ($returnBpId) {
+            $partners = $partners->where('id', $returnBpId)->values();
+        }
 
         return view('admin.users.create', [
             'routePrefix' => 'admin',
             'userType' => $type,
             'roles' => $users->assignableRoleCodes($actor, $type),
-            'businessPartners' => BusinessPartner::query()->orderBy('code')->get(['id', 'code', 'name']),
+            'businessPartners' => $partners,
             'customers' => Customer::query()->orderBy('code')->get(['id', 'code', 'name', 'managing_bp_id']),
+            'selectedCustomerId' => $selectedCustomerId,
+            'returnCustomerId' => $returnCustomerId,
+            'returnBpId' => $returnBpId,
+            'lockOrganization' => $returnBpId !== null,
+            'lockUserType' => $returnBpId !== null || $returnCustomerId !== null,
         ]);
     }
 
@@ -124,9 +132,7 @@ class UserPrivilegeController extends Controller
             throw ValidationException::withMessages(['login_id' => $exception->getMessage()]);
         }
 
-        return redirect()
-            ->route('admin.users.index', ['tab' => $user->user_type->value])
-            ->with('status', "{$user->login_id} を作成しました。");
+        return $this->redirectAfterUserMutation($request, $user->user_type->value, "{$user->login_id} を作成しました。");
     }
 
     public function edit(Request $request, User $user, AuthorizationService $authorization, UserManagementService $users): View
@@ -136,11 +142,18 @@ class UserPrivilegeController extends Controller
         $users->assertCanManageTarget($actor, $user);
         $user->load('roles');
 
+        $returnCustomerId = $request->filled('return_customer_id')
+            ? (int) $request->input('return_customer_id')
+            : ($user->user_type === UserType::Customer ? $user->customer_id : null);
+        $returnBpId = $request->filled('return_bp_id') ? (int) $request->input('return_bp_id') : null;
+
         return view('admin.users.edit', [
             'routePrefix' => 'admin',
             'managedUser' => $user,
             'roles' => $users->assignableRoleCodes($actor, $user->user_type),
             'deleteConfirmationCode' => $this->issueUserDeleteConfirmationCode($user),
+            'returnCustomerId' => $returnCustomerId,
+            'returnBpId' => $returnBpId,
         ]);
     }
 
@@ -154,15 +167,17 @@ class UserPrivilegeController extends Controller
             throw ValidationException::withMessages(['name' => $exception->getMessage()]);
         }
 
-        return redirect()
-            ->route('admin.users.index', ['tab' => $user->user_type->value])
-            ->with('status', 'ユーザーを更新しました。');
+        return $this->redirectAfterUserMutation($request, $user->user_type->value, 'ユーザーを更新しました。');
     }
 
     public function destroy(Request $request, User $user, UserManagementService $users): RedirectResponse
     {
         $this->assertUserDeleteConfirmation($request, $user);
         $tab = $user->user_type->value;
+        $returnCustomerId = $request->filled('return_customer_id')
+            ? (int) $request->input('return_customer_id')
+            : ($user->user_type === UserType::Customer ? $user->customer_id : null);
+        $returnBpId = $request->filled('return_bp_id') ? (int) $request->input('return_bp_id') : null;
 
         try {
             $users->delete($request->user('admin'), $user);
@@ -170,9 +185,27 @@ class UserPrivilegeController extends Controller
             throw ValidationException::withMessages(['user' => $exception->getMessage()]);
         }
 
+        return $this->redirectAfterUserMutation($request, $tab, 'ユーザーを削除しました。');
+    }
+
+    private function redirectAfterUserMutation(Request $request, string $tab, string $status): RedirectResponse
+    {
+        $returnCustomerId = $request->filled('return_customer_id') ? (int) $request->input('return_customer_id') : null;
+        $returnBpId = $request->filled('return_bp_id') ? (int) $request->input('return_bp_id') : null;
+        if ($returnCustomerId) {
+            return redirect()
+                ->route('admin.customers.show', ['customer' => $returnCustomerId, 'tab' => 'users'])
+                ->with('status', $status);
+        }
+        if ($returnBpId) {
+            return redirect()
+                ->route('admin.business-partners.show', ['businessPartner' => $returnBpId, 'tab' => 'users'])
+                ->with('status', $status);
+        }
+
         return redirect()
             ->route('admin.users.index', ['tab' => $tab])
-            ->with('status', 'ユーザーを削除しました。');
+            ->with('status', $status);
     }
 
     public function forcePassword(Request $request, User $user, AdminPrivilegeService $privileges): RedirectResponse

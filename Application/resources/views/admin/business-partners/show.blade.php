@@ -7,12 +7,55 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
+    @php
+        $prefix = $routePrefix ?? 'admin';
+        $canManageUsers = $canManageUsers ?? false;
+        $canViewCustomers = $canViewCustomers ?? false;
+        $canManageCustomers = $canManageCustomers ?? false;
+        $canViewTickets = ($prefix === 'admin') && ($canViewTickets ?? false);
+        $bpUsers = $bpUsers ?? collect();
+        $bpCustomers = $bpCustomers ?? collect();
+        $bpTickets = $bpTickets ?? collect();
+        $allowedTabs = ['overview'];
+        if ($canViewCustomers) {
+            $allowedTabs[] = 'customers';
+        }
+        if ($canManageUsers) {
+            $allowedTabs[] = 'users';
+        }
+        if ($canViewTickets) {
+            $allowedTabs[] = 'tickets';
+        }
+        $activeTab = $activeTab ?? 'overview';
+        if (! in_array($activeTab, $allowedTabs, true)) {
+            $activeTab = 'overview';
+        }
+        $showTabs = count($allowedTabs) > 1;
+        $tabLabels = [
+            'overview' => '基本情報',
+            'customers' => 'カスタマー',
+            'users' => 'ユーザー管理',
+            'tickets' => 'チケット',
+        ];
+    @endphp
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h3 mb-0">BP詳細</h1>
         <div class="d-flex gap-2">
-            <a href="{{ route(($routePrefix ?? 'admin').'.business-partners.edit', $partner) }}" class="btn btn-primary btn-sm">編集</a>
-            <a href="{{ route(($routePrefix ?? 'admin').'.business-partners.create', ['parent_id' => $partner->id]) }}" class="btn btn-outline-primary btn-sm">子BP追加</a>
-            <a href="{{ route(($routePrefix ?? 'admin').'.business-partners.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
+            @if ($activeTab === 'overview')
+                <a href="{{ route($prefix.'.business-partners.edit', $partner) }}" class="btn btn-primary btn-sm">編集</a>
+                <a href="{{ route($prefix.'.business-partners.create', ['parent_id' => $partner->id]) }}" class="btn btn-outline-primary btn-sm">子BP追加</a>
+            @elseif ($activeTab === 'customers' && $canManageCustomers)
+                <a
+                    href="{{ route($prefix.'.customers.create', ['managing_bp_id' => $partner->id]) }}"
+                    class="btn btn-primary btn-sm"
+                >カスタマー追加</a>
+            @elseif ($activeTab === 'users')
+                <a
+                    href="{{ route($prefix.'.users.create', ['type' => 'bp', 'bp_id' => $partner->id, 'return_bp_id' => $partner->id]) }}"
+                    class="btn btn-primary btn-sm"
+                >ユーザー追加</a>
+            @endif
+            <a href="{{ route($prefix.'.business-partners.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
         </div>
     </div>
 
@@ -23,6 +66,22 @@
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif
 
+    @if ($showTabs)
+        <ul class="nav nav-tabs mb-3">
+            @foreach ($tabLabels as $tabKey => $label)
+                @if (in_array($tabKey, $allowedTabs, true))
+                    <li class="nav-item">
+                        <a
+                            class="nav-link @if ($activeTab === $tabKey) active @endif"
+                            href="{{ route($prefix.'.business-partners.show', $tabKey === 'overview' ? $partner : ['businessPartner' => $partner, 'tab' => $tabKey]) }}"
+                        >{{ $label }}</a>
+                    </li>
+                @endif
+            @endforeach
+        </ul>
+    @endif
+
+    @if ($activeTab === 'overview')
     <dl class="row">
         <dt class="col-sm-3">BPN</dt><dd class="col-sm-9"><code>{{ $partner->code }}</code></dd>
         <dt class="col-sm-3">名称</dt><dd class="col-sm-9">{{ $partner->name }}</dd>
@@ -71,6 +130,92 @@
     </div>
 
     <button type="button" class="btn btn-outline-danger btn-sm mt-4" id="bpDeleteOpen">削除</button>
+    @endif
+
+    @if ($activeTab === 'customers')
+        <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle">
+                <thead>
+                <tr>
+                    <th>CN</th>
+                    <th>カスタマー名</th>
+                    <th>2FA</th>
+                    <th>状態</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody>
+                @forelse ($bpCustomers as $customer)
+                    <tr>
+                        <td><code>{{ $customer->code }}</code></td>
+                        <td>{{ $customer->name }}</td>
+                        <td>{{ $customer->two_factor_mode?->value }}</td>
+                        <td>
+                            @if ($customer->is_active)
+                                <span class="badge text-bg-success">有効</span>
+                            @else
+                                <span class="badge text-bg-secondary">無効</span>
+                            @endif
+                        </td>
+                        <td class="text-end">
+                            <a href="{{ route($prefix.'.customers.show', $customer) }}" class="btn btn-outline-secondary btn-sm">詳細</a>
+                        </td>
+                    </tr>
+                @empty
+                    <tr><td colspan="5" class="text-muted text-center">カスタマーなし</td></tr>
+                @endforelse
+                </tbody>
+            </table>
+        </div>
+    @endif
+
+    @if ($activeTab === 'users')
+        <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle">
+                <thead>
+                <tr>
+                    <th>ログインID</th>
+                    <th>氏名</th>
+                    <th>ロール</th>
+                    <th>状態</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody>
+                @forelse ($bpUsers as $user)
+                    <tr>
+                        <td><code>{{ $user->login_id }}</code></td>
+                        <td>{{ $user->name }}</td>
+                        <td><code>{{ $user->roles->first()?->code ?? '-' }}</code></td>
+                        <td>
+                            @if ($user->is_active)
+                                <span class="badge text-bg-success">有効</span>
+                            @else
+                                <span class="badge text-bg-secondary">無効</span>
+                            @endif
+                        </td>
+                        <td class="text-end">
+                            <a
+                                href="{{ route($prefix.'.users.edit', ['user' => $user, 'return_bp_id' => $partner->id]) }}"
+                                class="btn btn-outline-secondary btn-sm"
+                            >編集</a>
+                        </td>
+                    </tr>
+                @empty
+                    <tr><td colspan="5" class="text-muted text-center">ユーザーなし</td></tr>
+                @endforelse
+                </tbody>
+            </table>
+        </div>
+    @endif
+
+    @if ($activeTab === 'tickets' && $canViewTickets)
+        <p class="small text-muted mb-3">このBPが受領したチケットを閲覧できます（操作はできません）。</p>
+        @include('admin.tickets._org_list', [
+            'tickets' => $bpTickets,
+            'inspectBack' => ['return_bp_id' => $partner->id],
+        ])
+    @endif
 
     <dialog id="bpMoveDialog" class="border-0 rounded-3 shadow p-0" style="max-width: 28rem; width: calc(100% - 2rem);">
         <form method="POST" action="{{ route(($routePrefix ?? 'admin').'.business-partners.move', $partner) }}" class="p-4" id="bpMoveForm">

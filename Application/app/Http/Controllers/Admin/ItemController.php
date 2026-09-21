@@ -27,10 +27,14 @@ class ItemController extends Controller
 
         $items = Item::query()
             ->with('requiredItem')
+            ->whereNull('owning_bp_id')
             ->orderBy('code')
             ->paginate(20);
 
-        return view('admin.items.index', compact('items'));
+        return view('admin.items.index', [
+            'items' => $items,
+            'routePrefix' => 'admin',
+        ]);
     }
 
     public function create(Request $request, AuthorizationService $authorization): View
@@ -38,8 +42,9 @@ class ItemController extends Controller
         $authorization->authorize($request->user('admin'), 'item.manage');
 
         return view('admin.items.create', [
+            'routePrefix' => 'admin',
             'billingTypes' => BillingType::cases(),
-            'requiredCandidates' => Item::query()->orderBy('code')->get(),
+            'requiredCandidates' => Item::query()->whereNull('owning_bp_id')->orderBy('code')->get(),
         ]);
     }
 
@@ -65,6 +70,9 @@ class ItemController extends Controller
 
         return view('admin.items.show', [
             'item' => $item,
+            'routePrefix' => 'admin',
+            'canManageItem' => true,
+            'canManageDocuments' => true,
             'deleteConfirmationCode' => $this->issueItemDeleteConfirmationCode($item),
             'documentDeleteCodes' => $item->documents
                 ->mapWithKeys(fn ($document) => [
@@ -80,8 +88,13 @@ class ItemController extends Controller
 
         return view('admin.items.edit', [
             'item' => $item,
+            'routePrefix' => 'admin',
             'billingTypes' => BillingType::cases(),
-            'requiredCandidates' => Item::query()->whereKeyNot($item->id)->orderBy('code')->get(),
+            'requiredCandidates' => Item::query()
+                ->whereNull('owning_bp_id')
+                ->whereKeyNot($item->id)
+                ->orderBy('code')
+                ->get(),
         ]);
     }
 
@@ -129,12 +142,14 @@ class ItemController extends Controller
             'recommended_price' => ['required', 'integer', 'min:0'],
             'user_price' => ['required', 'integer', 'min:0'],
             'tax_rate' => ['required', 'integer', 'min:0', 'max:100'],
+            'minimum_term_months' => ['nullable', 'integer', 'min:1', 'max:120'],
             'is_active' => ['nullable', 'boolean'],
         ]);
 
         $validated['is_active'] = $request->boolean('is_active');
         $validated['required_item_id'] = $validated['required_item_id'] ?? null;
         $validated['tax_rate'] = (int) $validated['tax_rate'];
+        $validated['minimum_term_months'] = $validated['minimum_term_months'] ?? null;
 
         return $validated;
     }

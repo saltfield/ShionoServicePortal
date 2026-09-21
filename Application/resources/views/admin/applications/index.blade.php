@@ -35,23 +35,17 @@
                 @forelse ($applications as $application)
                     <tr>
                         <td>{{ $application->type->label() }}</td>
-                        <td><a href="{{ route(($routePrefix ?? 'admin').'.contracts.show', $application->contract_id) }}"><code>{{ $application->contract?->code }}</code></a></td>
+                        <td><code>{{ $application->contract?->code }}</code></td>
                         <td>{{ $application->fromBp?->code }}</td>
                         <td>{{ $application->toBp?->code }}</td>
                         <td class="text-end">{{ number_format($application->amount ?? 0, 0) }}</td>
                         <td>{{ $application->status->label() }}</td>
                         <td>
-                            @if ($application->status->value === 'pending')
-                                <form method="POST" action="{{ route(($routePrefix ?? 'admin').'.applications.decide', $application) }}" class="d-inline">
-                                    @csrf
-                                    <input type="hidden" name="approve" value="1">
-                                    <button class="btn btn-success btn-sm" type="submit">承認</button>
-                                </form>
-                                <form method="POST" action="{{ route(($routePrefix ?? 'admin').'.applications.decide', $application) }}" class="d-inline">
-                                    @csrf
-                                    <input type="hidden" name="approve" value="0">
-                                    <button class="btn btn-outline-danger btn-sm" type="submit">却下</button>
-                                </form>
+                            @if ($application->contract_id)
+                                <a
+                                    href="{{ route(($routePrefix ?? 'admin').'.contracts.show', ['contract' => $application->contract_id, 'tab' => 'items']) }}"
+                                    class="btn btn-outline-secondary btn-sm"
+                                >明細確認</a>
                             @endif
                         </td>
                     </tr>

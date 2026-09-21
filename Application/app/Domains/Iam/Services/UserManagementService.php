@@ -35,8 +35,8 @@ class UserManagementService
         $this->assertCreateAllowed($actor, $type, $data);
 
         $loginId = IdentifierNormalizer::normalize((string) $data['login_id']);
-        if (User::query()->where('login_id', $loginId)->exists()) {
-            throw new InvalidArgumentException('このログインIDは既に使用されています。');
+        if ($this->loginIdTaken($type, $loginId, $data)) {
+            throw new InvalidArgumentException('このログインIDは当該組織で既に使用されています。');
         }
 
         return DB::transaction(function () use ($actor, $data, $type, $loginId) {
@@ -145,14 +145,25 @@ class UserManagementService
     {
         return match ($forType) {
             UserType::Admin => $actor->user_type === UserType::Admin ? ['system_admin'] : [],
-            UserType::Bp => ['bp_owner', 'bp_sales', 'bp_support'],
-            UserType::Customer => ['customer_member'],
+            UserType::Bp => $actor->user_type === UserType::Customer
+                ? []
+                : ['bp_owner', 'bp_sales', 'bp_support'],
+            UserType::Customer => ['customer_owner', 'customer_member'],
         };
     }
 
     public function assertCanManageTarget(User $actor, User $target): void
     {
         if ($actor->user_type === UserType::Admin) {
+            return;
+        }
+
+        if ($actor->user_type === UserType::Customer) {
+            if ($target->user_type !== UserType::Customer
+                || (int) $target->customer_id !== (int) $actor->customer_id) {
+                abort(403, '自組織以外のユーザーは操作できません。');
+            }
+
             return;
         }
 
@@ -188,7 +199,12 @@ class UserManagementService
     private function assertCreateAllowed(User $actor, UserType $type, array $data): void
     {
         if ($actor->user_type === UserType::Customer) {
-            throw new InvalidArgumentException('カスタマーはユーザーを作成できません。');
+            if ($type !== UserType::Customer) {
+                throw new InvalidArgumentException('カスタマーは自組織のカスタマーユーザーのみ作成できます。');
+            }
+            if ((int) ($data['customer_id'] ?? 0) !== (int) $actor->customer_id) {
+                throw new InvalidArgumentException('自組織以外のカスタマーにはユーザーを作成できません。');
+            }
         }
 
         if ($actor->user_type === UserType::Bp) {
@@ -224,9 +240,27 @@ class UserManagementService
 
     private function assertActorCanManage(User $actor): void
     {
-        if (! in_array($actor->user_type, [UserType::Admin, UserType::Bp], true)) {
-            throw new InvalidArgumentException('ユーザー管理は管理者またはBPのみ可能です。');
+        if (! in_array($actor->user_type, [UserType::Admin, UserType::Bp, UserType::Customer], true)) {
+            throw new InvalidArgumentException('ユーザー管理の操作主体が不正です。');
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function loginIdTaken(UserType $type, string $loginId, array $data): bool
+    {
+        $query = User::withTrashed()->where('login_id', $loginId);
+
+        return match ($type) {
+            UserType::Admin => $query->where('user_type', UserType::Admin)->exists(),
+            UserType::Bp => $query->where('user_type', UserType::Bp)
+                ->where('bp_id', (int) $data['bp_id'])
+                ->exists(),
+            UserType::Customer => $query->where('user_type', UserType::Customer)
+                ->where('customer_id', (int) $data['customer_id'])
+                ->exists(),
+        };
     }
 
     private function syncPrimaryRole(User $user, string $roleCode): void

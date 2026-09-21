@@ -35,15 +35,40 @@
                     @endforelse
                 </ul>
                 <h4 class="h6">ドキュメント</h4>
-                <ul class="mb-0">
-                    @forelse ($line->documents as $doc)
-                        <li>
-                            <a href="{{ route('customer.contracts.items.documents.download', [$line, $doc->id]) }}">{{ $doc->title }}</a>
-                        </li>
-                    @empty
-                        <li class="text-muted">なし</li>
-                    @endforelse
-                </ul>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>タイトル</th>
+                                <th>ファイル</th>
+                                <th>区分</th>
+                                <th class="text-end">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse ($line->documents as $doc)
+                                <tr>
+                                    <td>{{ $doc->title }}</td>
+                                    <td><code class="small">{{ $doc->original_name ?: '—' }}</code></td>
+                                    <td>
+                                        @if ($contract->status->value === 'activated')
+                                            <span class="badge text-bg-success">ダウンロード可</span>
+                                        @else
+                                            <span class="badge text-bg-secondary">準備中</span>
+                                        @endif
+                                    </td>
+                                    <td class="text-end">
+                                        <a href="{{ route('customer.contracts.items.documents.download', [$line, $doc->id]) }}" class="btn btn-outline-secondary btn-sm">DL</a>
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="4" class="text-muted">なし</td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     @endforeach

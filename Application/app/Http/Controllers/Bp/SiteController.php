@@ -34,7 +34,7 @@ class SiteController extends Controller
         $site = $service->createSite($request->user('bp'), $customer, $validated);
 
         return redirect()
-            ->route('bp.customers.show', $customer)
+            ->route('bp.customers.show', ['customer' => $customer, 'tab' => 'sites'])
             ->with('status', "拠点「{$site->name}」を作成しました。");
     }
 
@@ -58,7 +58,7 @@ class SiteController extends Controller
         $service->updateSite($request->user('bp'), $site, $validated);
 
         return redirect()
-            ->route('bp.customers.show', $site->customer_id)
+            ->route('bp.customers.show', ['customer' => $site->customer_id, 'tab' => 'sites'])
             ->with('status', '拠点情報を更新しました。');
     }
 
@@ -70,7 +70,7 @@ class SiteController extends Controller
         $service->deleteSite($request->user('bp'), $site);
 
         return redirect()
-            ->route('bp.customers.show', $customerId)
+            ->route('bp.customers.show', ['customer' => $customerId, 'tab' => 'sites'])
             ->with('status', '拠点を削除しました。');
     }
 

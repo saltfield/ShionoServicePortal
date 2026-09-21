@@ -242,3 +242,51 @@ it('requires matching confirmation code to delete business partner', function ()
 
     expect(BusinessPartner::query()->whereKey($child->id)->exists())->toBeFalse();
 });
+
+it('lists managed customers on business partner detail tab', function () {
+    masterAdmin();
+    $this->post(route('admin.login.store'), [
+        'login_id' => 'MASTERADMIN',
+        'password' => 'Password123!',
+    ]);
+
+    $this->post(route('admin.business-partners.store'), [
+        'name' => 'Customer Owner BP',
+        'two_factor_mode' => 'optional',
+        'is_active' => '1',
+    ]);
+    $bp = BusinessPartner::query()->where('name', 'Customer Owner BP')->first();
+
+    $this->post(route('admin.business-partners.store'), [
+        'name' => 'Other BP',
+        'two_factor_mode' => 'optional',
+        'is_active' => '1',
+    ]);
+    $otherBp = BusinessPartner::query()->where('name', 'Other BP')->first();
+
+    $this->post(route('admin.customers.store'), [
+        'managing_bp_id' => $bp->id,
+        'name' => 'Owned Customer',
+        'entity_type' => EntityType::Corporate->value,
+        'two_factor_mode' => TwoFactorMode::Optional->value,
+        'is_active' => '1',
+    ])->assertRedirect();
+
+    $this->post(route('admin.customers.store'), [
+        'managing_bp_id' => $otherBp->id,
+        'name' => 'Other Customer',
+        'entity_type' => EntityType::Corporate->value,
+        'two_factor_mode' => TwoFactorMode::Optional->value,
+        'is_active' => '1',
+    ])->assertRedirect();
+
+    $owned = Customer::query()->where('name', 'Owned Customer')->first();
+
+    $this->get(route('admin.business-partners.show', ['businessPartner' => $bp, 'tab' => 'customers']))
+        ->assertOk()
+        ->assertSee('カスタマー')
+        ->assertSee('Owned Customer')
+        ->assertSee($owned->code)
+        ->assertDontSee('Other Customer')
+        ->assertSee('カスタマー追加');
+});

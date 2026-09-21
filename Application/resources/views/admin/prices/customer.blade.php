@@ -9,7 +9,7 @@
 @section('content')
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h3 mb-0">カスタマー価格</h1>
-        <a href="{{ route(($routePrefix ?? 'admin').'.customers.show', $customer) }}" class="btn btn-outline-secondary btn-sm">カスタマー詳細へ</a>
+        <a href="{{ route(($routePrefix ?? 'admin').'.customers.show', ['customer' => $customer, 'tab' => 'prices']) }}" class="btn btn-outline-secondary btn-sm">カスタマー詳細へ</a>
     </div>
 
     <p class="text-muted mb-3">

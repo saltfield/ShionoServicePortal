@@ -25,7 +25,9 @@ class Item extends Model
         'recommended_price',
         'user_price',
         'tax_rate',
+        'minimum_term_months',
         'is_active',
+        'owning_bp_id',
     ];
 
     protected function casts(): array
@@ -36,6 +38,7 @@ class Item extends Model
             'recommended_price' => 'integer',
             'user_price' => 'integer',
             'tax_rate' => 'integer',
+            'minimum_term_months' => 'integer',
             'is_active' => 'boolean',
         ];
     }
@@ -47,6 +50,16 @@ class Item extends Model
                 $item->code = IdentifierNormalizer::normalize($item->code);
             }
         });
+    }
+
+    public function owningBp(): BelongsTo
+    {
+        return $this->belongsTo(BusinessPartner::class, 'owning_bp_id');
+    }
+
+    public function isBpOwned(): bool
+    {
+        return $this->owning_bp_id !== null;
     }
 
     public function requiredItem(): BelongsTo

@@ -16,8 +16,8 @@ enum ContractStatus: string
             self::Draft => '下書き',
             self::PendingPriceApproval => '価格承認待ち',
             self::Approved => '承認済',
-            self::Activated => '開通済',
-            self::Cancelled => '取消',
+            self::Activated => 'サービス提供開始',
+            self::Cancelled => '解約',
         };
     }
 }

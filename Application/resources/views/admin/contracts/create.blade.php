@@ -7,6 +7,11 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
+    @php
+        $prefix = $routePrefix ?? 'admin';
+        $returnCustomerId = $returnCustomerId ?? null;
+        $returnQuery = array_filter(['return_customer_id' => $returnCustomerId]);
+    @endphp
     <h1 class="h3 mb-3">契約申込（下書き）</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
@@ -19,7 +24,10 @@
     </ol>
 
     @unless ($selectedCustomer)
-        <form method="GET" action="{{ route(($routePrefix ?? 'admin').'.contracts.create') }}" class="row g-2 align-items-end mb-3">
+        <form method="GET" action="{{ route($prefix.'.contracts.create') }}" class="row g-2 align-items-end mb-3">
+            @if ($returnCustomerId)
+                <input type="hidden" name="return_customer_id" value="{{ $returnCustomerId }}">
+            @endif
             <div class="col-md-3">
                 <label class="form-label small mb-1" for="cn">CN</label>
                 <input type="text" name="cn" id="cn" class="form-control form-control-sm" value="{{ $filters['cn'] ?? '' }}" placeholder="部分一致">
@@ -30,7 +38,7 @@
             </div>
             <div class="col-auto">
                 <button class="btn btn-outline-primary btn-sm" type="submit">フィルター</button>
-                <a href="{{ route(($routePrefix ?? 'admin').'.contracts.create') }}" class="btn btn-outline-secondary btn-sm">クリア</a>
+                <a href="{{ route($prefix.'.contracts.create', $returnQuery) }}" class="btn btn-outline-secondary btn-sm">クリア</a>
             </div>
         </form>
 
@@ -51,7 +59,7 @@
                             <td>{{ $customer->name }}</td>
                             <td>{{ $customer->managingBp?->code }} / {{ $customer->managingBp?->name }}</td>
                             <td class="text-end">
-                                <a class="btn btn-outline-primary btn-sm" href="{{ route(($routePrefix ?? 'admin').'.contracts.create', array_filter(['customer_id' => $customer->id, 'cn' => $filters['cn'] ?: null, 'customer_name' => $filters['customer_name'] ?: null])) }}">選択</a>
+                                <a class="btn btn-outline-primary btn-sm" href="{{ route($prefix.'.contracts.create', array_filter(['customer_id' => $customer->id, 'cn' => $filters['cn'] ?: null, 'customer_name' => $filters['customer_name'] ?: null, 'return_customer_id' => $returnCustomerId])) }}">選択</a>
                             </td>
                         </tr>
                     @empty
@@ -69,13 +77,20 @@
                     <strong><code>{{ $selectedCustomer->code }}</code> / {{ $selectedCustomer->name }}</strong>
                     <div class="small text-muted">管理BP: {{ $selectedCustomer->managingBp?->code }}</div>
                 </div>
-                <a href="{{ route(($routePrefix ?? 'admin').'.contracts.create') }}" class="btn btn-outline-secondary btn-sm">変更</a>
+                @if ($returnCustomerId)
+                    <a href="{{ route($prefix.'.customers.show', ['customer' => $returnCustomerId, 'tab' => 'contracts']) }}" class="btn btn-outline-secondary btn-sm">戻る</a>
+                @else
+                    <a href="{{ route($prefix.'.contracts.create') }}" class="btn btn-outline-secondary btn-sm">変更</a>
+                @endif
             </div>
         </div>
 
         @unless ($selectedSite)
-            <form method="GET" action="{{ route(($routePrefix ?? 'admin').'.contracts.create') }}" class="card card-body" style="max-width:40rem">
+            <form method="GET" action="{{ route($prefix.'.contracts.create') }}" class="card card-body" style="max-width:40rem">
                 <input type="hidden" name="customer_id" value="{{ $selectedCustomer->id }}">
+                @if ($returnCustomerId)
+                    <input type="hidden" name="return_customer_id" value="{{ $returnCustomerId }}">
+                @endif
                 <div class="mb-3">
                     <label class="form-label" for="site_id">拠点</label>
                     <select name="site_id" id="site_id" class="form-select" required>
@@ -98,13 +113,16 @@
                         <div class="small text-muted">選択中拠点</div>
                         <strong>{{ $selectedSite->name }}</strong>
                     </div>
-                    <a href="{{ route(($routePrefix ?? 'admin').'.contracts.create', ['customer_id' => $selectedCustomer->id]) }}" class="btn btn-outline-secondary btn-sm">変更</a>
+                    <a href="{{ route($prefix.'.contracts.create', array_merge(['customer_id' => $selectedCustomer->id], $returnQuery)) }}" class="btn btn-outline-secondary btn-sm">変更</a>
                 </div>
             </div>
 
-            <form method="GET" action="{{ route(($routePrefix ?? 'admin').'.contracts.create') }}" class="row g-2 align-items-end mb-3">
+            <form method="GET" action="{{ route($prefix.'.contracts.create') }}" class="row g-2 align-items-end mb-3">
                 <input type="hidden" name="customer_id" value="{{ $selectedCustomer->id }}">
                 <input type="hidden" name="site_id" value="{{ $selectedSite->id }}">
+                @if ($returnCustomerId)
+                    <input type="hidden" name="return_customer_id" value="{{ $returnCustomerId }}">
+                @endif
                 <div class="col-md-3">
                     <label class="form-label small mb-1" for="item_code">コード</label>
                     <input type="text" name="item_code" id="item_code" class="form-control form-control-sm" value="{{ $filters['item_code'] ?? '' }}" placeholder="部分一致">
@@ -115,13 +133,16 @@
                 </div>
                 <div class="col-auto">
                     <button class="btn btn-outline-primary btn-sm" type="submit">フィルター</button>
-                    <a href="{{ route(($routePrefix ?? 'admin').'.contracts.create', ['customer_id' => $selectedCustomer->id, 'site_id' => $selectedSite->id]) }}" class="btn btn-outline-secondary btn-sm">クリア</a>
+                    <a href="{{ route($prefix.'.contracts.create', array_merge(['customer_id' => $selectedCustomer->id, 'site_id' => $selectedSite->id], $returnQuery)) }}" class="btn btn-outline-secondary btn-sm">クリア</a>
                 </div>
             </form>
 
-            <form method="POST" action="{{ route(($routePrefix ?? 'admin').'.contracts.store') }}">
+            <form method="POST" action="{{ route($prefix.'.contracts.store') }}">
                 @csrf
                 <input type="hidden" name="site_id" value="{{ $selectedSite->id }}">
+                @if ($returnCustomerId)
+                    <input type="hidden" name="return_customer_id" value="{{ $returnCustomerId }}">
+                @endif
                 <div class="table-responsive mb-3">
                     <table class="table table-sm table-striped align-middle">
                         <thead>

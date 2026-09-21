@@ -6,10 +6,13 @@ use App\Domains\Auth\Enums\TwoFactorMode;
 use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Bp\Services\OrganizationMasterService;
 use App\Domains\Iam\Services\AuthorizationService;
+use App\Domains\Iam\Services\RbacService;
 use App\Http\Controllers\Concerns\ConfirmsBusinessPartnerDeletion;
 use App\Http\Controllers\Concerns\ConfirmsBusinessPartnerMove;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
+use App\Models\Customer;
+use App\Models\User;
 use App\Support\ContactFieldRules;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -43,6 +46,7 @@ class BusinessPartnerController extends Controller
             'partners' => $partners,
             'filters' => ['bpn' => '', 'bp_name' => ''],
             'routePrefix' => 'bp',
+            'selfBpId' => $actorBp->id,
         ]);
     }
 
@@ -106,7 +110,7 @@ class BusinessPartnerController extends Controller
             ->with('status', "{$partner->code} を作成しました。");
     }
 
-    public function show(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization, BpHierarchyService $hierarchy): View
+    public function show(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization, BpHierarchyService $hierarchy, RbacService $rbac): View
     {
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'bp.view');
@@ -115,6 +119,14 @@ class BusinessPartnerController extends Controller
 
         $actorBp = $actor->businessPartner;
         $scopeIds = $hierarchy->descendantIdsIncludingSelf($actorBp);
+        $canManageUsers = $rbac->hasPermission($actor, 'iam.user.manage');
+        $canViewCustomers = $rbac->hasPermission($actor, 'customer.view');
+        $canManageCustomers = $rbac->hasPermission($actor, 'customer.manage');
+        $activeTab = match ($request->input('tab')) {
+            'users' => $canManageUsers ? 'users' : 'overview',
+            'customers' => $canViewCustomers ? 'customers' : 'overview',
+            default => 'overview',
+        };
 
         return view('admin.business-partners.show', [
             'partner' => $businessPartner,
@@ -129,6 +141,16 @@ class BusinessPartnerController extends Controller
             'allowRootMove' => false,
             'deleteConfirmationCode' => $this->issueBusinessPartnerDeleteConfirmationCode($businessPartner),
             'moveConfirmationCode' => $this->issueBusinessPartnerMoveConfirmationCode($businessPartner),
+            'canManageUsers' => $canManageUsers,
+            'canViewCustomers' => $canViewCustomers,
+            'canManageCustomers' => $canManageCustomers,
+            'bpUsers' => $canManageUsers
+                ? User::query()->with('roles')->where('bp_id', $businessPartner->id)->orderBy('login_id')->get()
+                : collect(),
+            'bpCustomers' => $canViewCustomers
+                ? Customer::query()->where('managing_bp_id', $businessPartner->id)->orderBy('code')->get()
+                : collect(),
+            'activeTab' => $activeTab,
         ]);
     }
 

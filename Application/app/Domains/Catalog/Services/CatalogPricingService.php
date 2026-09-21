@@ -28,12 +28,11 @@ class CatalogPricingService
 
     public function createItem(User $actor, array $data): Item
     {
-        $this->assertAdmin($actor);
-        $this->authorization->authorize($actor, 'item.manage');
+        $owningBpId = $this->assertCanManageItemCreate($actor, $data['owning_bp_id'] ?? null);
 
         $billingType = BillingType::from($data['billing_type']);
         $requiredItemId = $data['required_item_id'] ?? null;
-        $this->assertRequiredItem($requiredItemId, null);
+        $this->assertRequiredItem($requiredItemId, null, $owningBpId);
 
         $item = Item::query()->create([
             'code' => $this->sequences->next(PartnerCodePrefix::Item),
@@ -45,7 +44,11 @@ class CatalogPricingService
             'recommended_price' => (int) ($data['recommended_price'] ?? 0),
             'user_price' => (int) ($data['user_price'] ?? 0),
             'tax_rate' => (int) ($data['tax_rate'] ?? 10),
+            'minimum_term_months' => isset($data['minimum_term_months']) && $data['minimum_term_months'] !== ''
+                ? (int) $data['minimum_term_months']
+                : null,
             'is_active' => (bool) ($data['is_active'] ?? true),
+            'owning_bp_id' => $owningBpId,
         ]);
 
         $this->auditLogger->log(
@@ -55,7 +58,11 @@ class CatalogPricingService
             actor: $actor,
             targetType: Item::class,
             targetId: $item->id,
-            meta: ['code' => $item->code, 'billing_type' => $item->billing_type->value],
+            meta: [
+                'code' => $item->code,
+                'billing_type' => $item->billing_type->value,
+                'owning_bp_id' => $owningBpId,
+            ],
         );
 
         return $item;
@@ -63,14 +70,13 @@ class CatalogPricingService
 
     public function updateItem(User $actor, Item $item, array $data): Item
     {
-        $this->assertAdmin($actor);
-        $this->authorization->authorize($actor, 'item.manage');
+        $this->assertCanManageItem($actor, $item);
 
         $billingType = BillingType::from($data['billing_type'] ?? $item->billing_type->value);
         $requiredItemId = array_key_exists('required_item_id', $data)
             ? $data['required_item_id']
             : $item->required_item_id;
-        $this->assertRequiredItem($requiredItemId, $item->id);
+        $this->assertRequiredItem($requiredItemId, $item->id, $item->owning_bp_id);
 
         $item->fill([
             'name' => $data['name'] ?? $item->name,
@@ -81,6 +87,11 @@ class CatalogPricingService
             'recommended_price' => array_key_exists('recommended_price', $data) ? (int) $data['recommended_price'] : $item->recommended_price,
             'user_price' => array_key_exists('user_price', $data) ? (int) $data['user_price'] : $item->user_price,
             'tax_rate' => array_key_exists('tax_rate', $data) ? (int) $data['tax_rate'] : $item->tax_rate,
+            'minimum_term_months' => array_key_exists('minimum_term_months', $data)
+                ? ($data['minimum_term_months'] === null || $data['minimum_term_months'] === ''
+                    ? null
+                    : (int) $data['minimum_term_months'])
+                : $item->minimum_term_months,
             'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : $item->is_active,
         ]);
         $item->save();
@@ -100,8 +111,7 @@ class CatalogPricingService
 
     public function deleteItem(User $actor, Item $item): void
     {
-        $this->assertAdmin($actor);
-        $this->authorization->authorize($actor, 'item.manage');
+        $this->assertCanManageItem($actor, $item);
 
         if ($item->requiredByItems()->exists()) {
             throw new InvalidArgumentException('他品目の必須セット先のため削除できません。');
@@ -254,14 +264,48 @@ class CatalogPricingService
         return (string) (int) round((float) ($row?->amount ?? $item->user_price));
     }
 
-    private function assertAdmin(User $actor): void
+    private function assertCanManageItemCreate(User $actor, mixed $requestedOwningBpId): ?int
     {
-        if ($actor->user_type !== UserType::Admin) {
-            throw new InvalidArgumentException('品目の作成・更新・削除は管理者のみ可能です。');
+        if ($actor->user_type === UserType::Admin) {
+            $this->authorization->authorize($actor, 'item.manage');
+
+            return null;
+        }
+
+        if ($actor->user_type !== UserType::Bp) {
+            throw new InvalidArgumentException('品目を作成する権限がありません。');
+        }
+
+        $this->authorization->authorize($actor, 'contract.create');
+        $actorBp = $actor->businessPartner;
+        abort_unless($actorBp, 403);
+        $owningBpId = $requestedOwningBpId ? (int) $requestedOwningBpId : $actorBp->id;
+        abort_unless($owningBpId === (int) $actorBp->id, 403, '自BP以外の独自サービスは作成できません。');
+
+        return $owningBpId;
+    }
+
+    private function assertCanManageItem(User $actor, Item $item): void
+    {
+        if ($actor->user_type === UserType::Admin) {
+            $this->authorization->authorize($actor, 'item.manage');
+
+            return;
+        }
+
+        if ($actor->user_type !== UserType::Bp) {
+            throw new InvalidArgumentException('品目を更新する権限がありません。');
+        }
+
+        $this->authorization->authorize($actor, 'contract.create');
+        $actorBp = $actor->businessPartner;
+        abort_unless($actorBp, 403);
+        if (! $item->isBpOwned() || (int) $item->owning_bp_id !== (int) $actorBp->id) {
+            throw new InvalidArgumentException('標準品目は編集できません。自BPの独自サービスのみ編集できます。');
         }
     }
 
-    private function assertRequiredItem(mixed $requiredItemId, ?int $selfId): void
+    private function assertRequiredItem(mixed $requiredItemId, ?int $selfId, ?int $owningBpId = null): void
     {
         if ($requiredItemId === null || $requiredItemId === '') {
             return;
@@ -275,6 +319,13 @@ class CatalogPricingService
         $required = Item::query()->find($requiredId);
         if ($required === null) {
             throw new InvalidArgumentException('必須セット品目が見つかりません。');
+        }
+
+        if ($owningBpId !== null) {
+            $allowed = $required->owning_bp_id === null || (int) $required->owning_bp_id === (int) $owningBpId;
+            if (! $allowed) {
+                throw new InvalidArgumentException('必須セット品目には標準品目または自BPの独自サービスのみ指定できます。');
+            }
         }
 
         if ($selfId !== null && $this->wouldCreateRequirementCycle($selfId, $requiredId)) {

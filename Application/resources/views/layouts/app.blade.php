@@ -34,10 +34,40 @@
 
             <div class="collapse navbar-collapse" id="portalNavbar">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                    @foreach ($menuItems as $item)
-                        <li class="nav-item">
-                            <a class="nav-link{{ request()->url() === $item['url'] ? ' active' : '' }}" href="{{ $item['url'] }}">{{ $item['label'] }}</a>
-                        </li>
+                    @foreach ($menuItems as $index => $item)
+                        @if (($item['type'] ?? 'link') === 'group')
+                            @php
+                                $groupActive = collect($item['children'])->contains(
+                                    fn ($child) => request()->url() === $child['url']
+                                        || str_starts_with(request()->url().'/', rtrim($child['url'], '/').'/')
+                                );
+                                $groupId = 'portalMenuGroup'.$index;
+                            @endphp
+                            <li class="nav-item dropdown">
+                                <a
+                                    class="nav-link dropdown-toggle{{ $groupActive ? ' active' : '' }}"
+                                    href="#"
+                                    id="{{ $groupId }}"
+                                    role="button"
+                                    data-bs-toggle="dropdown"
+                                    aria-expanded="false"
+                                >{{ $item['label'] }}</a>
+                                <ul class="dropdown-menu" aria-labelledby="{{ $groupId }}">
+                                    @foreach ($item['children'] as $child)
+                                        <li>
+                                            <a
+                                                class="dropdown-item{{ request()->url() === $child['url'] ? ' active' : '' }}"
+                                                href="{{ $child['url'] }}"
+                                            >{{ $child['label'] }}</a>
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            </li>
+                        @else
+                            <li class="nav-item">
+                                <a class="nav-link{{ request()->url() === $item['url'] ? ' active' : '' }}" href="{{ $item['url'] }}">{{ $item['label'] }}</a>
+                            </li>
+                        @endif
                     @endforeach
                 </ul>
 

@@ -21,6 +21,12 @@ class Contract extends Model
         'status',
         'applied_at',
         'activated_at',
+        'first_billing_year_month',
+        'final_billing_year_month',
+        'cancelled_at',
+        'cancellation_amount',
+        'cancellation_note',
+        'minimum_term_months_snapshot',
     ];
 
     protected function casts(): array
@@ -29,6 +35,9 @@ class Contract extends Model
             'status' => ContractStatus::class,
             'applied_at' => 'datetime',
             'activated_at' => 'datetime',
+            'cancelled_at' => 'datetime',
+            'cancellation_amount' => 'integer',
+            'minimum_term_months_snapshot' => 'integer',
         ];
     }
 
@@ -69,5 +78,10 @@ class Contract extends Model
     public function applications(): HasMany
     {
         return $this->hasMany(Application::class);
+    }
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(ContractMessage::class)->orderBy('created_at');
     }
 }

@@ -11,10 +11,29 @@
     </div>
 
     <dl class="row">
-        <dt class="col-sm-3">日時</dt><dd class="col-sm-9">{{ $log->created_at }}</dd>
+        <dt class="col-sm-3">日時</dt><dd class="col-sm-9">{{ $log->created_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s') }}</dd>
         <dt class="col-sm-3">区分</dt><dd class="col-sm-9">{{ $log->category }}</dd>
         <dt class="col-sm-3">アクション</dt><dd class="col-sm-9"><code>{{ $log->action }}</code></dd>
         <dt class="col-sm-3">結果</dt><dd class="col-sm-9">{{ $log->result }}</dd>
+        <dt class="col-sm-3">実行者区分</dt>
+        <dd class="col-sm-9">
+            {{ match ($log->actor?->user_type?->value) {
+                'admin' => '管理者',
+                'bp' => 'BP',
+                'customer' => 'カスタマー',
+                default => '—',
+            } }}
+        </dd>
+        <dt class="col-sm-3">組織</dt>
+        <dd class="col-sm-9">
+            @if ($log->actor?->user_type?->value === 'bp' && $log->actor->businessPartner)
+                {{ $log->actor->businessPartner->code }} / {{ $log->actor->businessPartner->name }}
+            @elseif ($log->actor?->user_type?->value === 'customer' && $log->actor->customer)
+                {{ $log->actor->customer->code }} / {{ $log->actor->customer->name }}
+            @else
+                —
+            @endif
+        </dd>
         <dt class="col-sm-3">実行者</dt><dd class="col-sm-9">{{ $log->actor?->login_id ?? '-' }}</dd>
         <dt class="col-sm-3">対象ユーザー</dt><dd class="col-sm-9">{{ $log->targetUser?->login_id ?? '-' }}</dd>
         <dt class="col-sm-3">対象リソース</dt><dd class="col-sm-9">{{ $log->target_type ? $log->target_type.'#'.$log->target_id : '-' }}</dd>

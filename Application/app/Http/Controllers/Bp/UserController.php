@@ -27,32 +27,21 @@ class UserController extends Controller
     {
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'iam.user.manage');
-        $scope = $hierarchy->descendantIdsIncludingSelf($actor->businessPartner);
-
-        $tab = $request->input('tab', UserType::Bp->value);
-        if (! in_array($tab, [UserType::Bp->value, UserType::Customer->value], true)) {
-            $tab = UserType::Bp->value;
-        }
-        $userType = UserType::from($tab);
+        $actorBp = $actor->businessPartner;
+        abort_unless($actorBp, 403);
 
         $users = User::query()
-            ->with(['businessPartner', 'customer.managingBp', 'roles'])
-            ->where('user_type', $userType)
-            ->when($userType === UserType::Bp, fn ($q) => $q->whereIn('bp_id', $scope))
-            ->when($userType === UserType::Customer, function ($q) use ($scope) {
-                $q->whereHas('customer', fn ($c) => $c->whereIn('managing_bp_id', $scope));
-            })
+            ->with(['businessPartner', 'roles'])
+            ->where('user_type', UserType::Bp)
+            ->where('bp_id', $actorBp->id)
             ->orderBy('login_id')
-            ->paginate(20)
-            ->withQueryString();
+            ->paginate(20);
 
         return view('admin.users.index', [
             'users' => $users,
-            'tab' => $tab,
+            'tab' => UserType::Bp->value,
             'counts' => [
-                UserType::Bp->value => User::query()->where('user_type', UserType::Bp)->whereIn('bp_id', $scope)->count(),
-                UserType::Customer->value => User::query()->where('user_type', UserType::Customer)
-                    ->whereHas('customer', fn ($c) => $c->whereIn('managing_bp_id', $scope))->count(),
+                UserType::Bp->value => $users->total(),
             ],
             'managingPartners' => collect(),
             'filters' => [
@@ -65,6 +54,8 @@ class UserController extends Controller
             'routePrefix' => 'bp',
             'hideAdminTab' => true,
             'hidePrivilegeActions' => true,
+            'selfBpOnly' => true,
+            'actorBp' => $actorBp,
         ]);
     }
 
@@ -72,18 +63,43 @@ class UserController extends Controller
     {
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'iam.user.manage');
+        $actorBp = $actor->businessPartner;
+        abort_unless($actorBp, 403);
+
         $type = UserType::from($request->input('type', UserType::Bp->value));
         if ($type === UserType::Admin) {
             $type = UserType::Bp;
         }
-        $scope = $hierarchy->descendantIdsIncludingSelf($actor->businessPartner);
+
+        $scope = $hierarchy->descendantIdsIncludingSelf($actorBp);
+        $returnBpId = $request->filled('return_bp_id') ? (int) $request->input('return_bp_id') : null;
+        if ($returnBpId !== null && ! in_array($returnBpId, $scope, true)) {
+            abort(403);
+        }
+
+        $selectedBpId = $type === UserType::Bp
+            ? ($returnBpId ?? (int) $actorBp->id)
+            : null;
+        if ($selectedBpId !== null && ! in_array($selectedBpId, $scope, true)) {
+            abort(403);
+        }
+
+        $selectedCustomerId = $request->filled('customer_id') ? (int) $request->input('customer_id') : null;
+        $returnCustomerId = $request->filled('return_customer_id') ? (int) $request->input('return_customer_id') : $selectedCustomerId;
 
         return view('admin.users.create', [
             'routePrefix' => 'bp',
             'userType' => $type,
             'roles' => $users->assignableRoleCodes($actor, $type),
-            'businessPartners' => BusinessPartner::query()->whereIn('id', $scope)->orderBy('code')->get(['id', 'code', 'name']),
+            'businessPartners' => $selectedBpId
+                ? BusinessPartner::query()->whereKey($selectedBpId)->get(['id', 'code', 'name'])
+                : collect(),
             'customers' => Customer::query()->whereIn('managing_bp_id', $scope)->orderBy('code')->get(['id', 'code', 'name', 'managing_bp_id']),
+            'selectedCustomerId' => $selectedCustomerId,
+            'returnCustomerId' => $returnCustomerId,
+            'returnBpId' => $returnBpId,
+            'lockOrganization' => true,
+            'lockUserType' => true,
         ]);
     }
 
@@ -100,9 +116,7 @@ class UserController extends Controller
             throw ValidationException::withMessages(['login_id' => $exception->getMessage()]);
         }
 
-        return redirect()
-            ->route('bp.users.index', ['tab' => $user->user_type->value])
-            ->with('status', "{$user->login_id} を作成しました。");
+        return $this->redirectAfterUserMutation($request, $user->user_type->value, "{$user->login_id} を作成しました。");
     }
 
     public function edit(Request $request, User $user, AuthorizationService $authorization, UserManagementService $users): View
@@ -112,11 +126,20 @@ class UserController extends Controller
         $users->assertCanManageTarget($actor, $user);
         $user->load('roles');
 
+        $returnCustomerId = $request->filled('return_customer_id')
+            ? (int) $request->input('return_customer_id')
+            : ($user->user_type === UserType::Customer ? $user->customer_id : null);
+        $returnBpId = $request->filled('return_bp_id')
+            ? (int) $request->input('return_bp_id')
+            : null;
+
         return view('admin.users.edit', [
             'routePrefix' => 'bp',
             'managedUser' => $user,
             'roles' => $users->assignableRoleCodes($actor, $user->user_type),
             'deleteConfirmationCode' => $this->issueUserDeleteConfirmationCode($user),
+            'returnCustomerId' => $returnCustomerId,
+            'returnBpId' => $returnBpId,
         ]);
     }
 
@@ -130,15 +153,17 @@ class UserController extends Controller
             throw ValidationException::withMessages(['name' => $exception->getMessage()]);
         }
 
-        return redirect()
-            ->route('bp.users.index', ['tab' => $user->user_type->value])
-            ->with('status', 'ユーザーを更新しました。');
+        return $this->redirectAfterUserMutation($request, $user->user_type->value, 'ユーザーを更新しました。');
     }
 
     public function destroy(Request $request, User $user, UserManagementService $users): RedirectResponse
     {
         $this->assertUserDeleteConfirmation($request, $user);
         $tab = $user->user_type->value;
+        $returnCustomerId = $request->filled('return_customer_id')
+            ? (int) $request->input('return_customer_id')
+            : ($user->user_type === UserType::Customer ? $user->customer_id : null);
+        $returnBpId = $request->filled('return_bp_id') ? (int) $request->input('return_bp_id') : null;
 
         try {
             $users->delete($request->user('bp'), $user);
@@ -146,9 +171,42 @@ class UserController extends Controller
             throw ValidationException::withMessages(['user' => $exception->getMessage()]);
         }
 
+        return $this->redirectAfterUserMutation($request, $tab, 'ユーザーを削除しました。', $returnCustomerId, $returnBpId);
+    }
+
+    private function redirectAfterUserMutation(
+        Request $request,
+        string $tab,
+        string $status,
+        ?int $returnCustomerId = null,
+        ?int $returnBpId = null,
+    ): RedirectResponse {
+        $returnCustomerId = $returnCustomerId
+            ?? ($request->filled('return_customer_id') ? (int) $request->input('return_customer_id') : null);
+        $returnBpId = $returnBpId
+            ?? ($request->filled('return_bp_id') ? (int) $request->input('return_bp_id') : null);
+
+        if ($returnCustomerId) {
+            return redirect()
+                ->route('bp.customers.show', ['customer' => $returnCustomerId, 'tab' => 'users'])
+                ->with('status', $status);
+        }
+
+        if (! $returnCustomerId && $tab === UserType::Customer->value && $request->filled('customer_id')) {
+            return redirect()
+                ->route('bp.customers.show', ['customer' => (int) $request->input('customer_id'), 'tab' => 'users'])
+                ->with('status', $status);
+        }
+
+        if ($returnBpId) {
+            return redirect()
+                ->route('bp.business-partners.show', ['businessPartner' => $returnBpId, 'tab' => 'users'])
+                ->with('status', $status);
+        }
+
         return redirect()
-            ->route('bp.users.index', ['tab' => $tab])
-            ->with('status', 'ユーザーを削除しました。');
+            ->route('bp.users.index')
+            ->with('status', $status);
     }
 
     /**

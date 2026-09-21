@@ -93,6 +93,89 @@ it('allows admin to create bp and customer users', function () {
         ->and(AuditLog::query()->where('action', 'user.create')->count())->toBe(2);
 });
 
+it('allows the same login_id across organizations but not within one', function () {
+    $admin = userMgmtAdmin();
+    $tree = userMgmtBpOwner();
+    $outsideBpn = app(NumberSequenceService::class)->next(PartnerCodePrefix::Bpn);
+    $outside = app(BpHierarchyService::class)->createRoot($outsideBpn, 'Outside Shared BP');
+
+    $cnA = app(NumberSequenceService::class)->next(PartnerCodePrefix::Cn);
+    $customerA = Customer::factory()->create([
+        'code' => $cnA,
+        'managing_bp_id' => $tree['root']->id,
+        'name' => 'Customer A',
+    ]);
+    $cnB = app(NumberSequenceService::class)->next(PartnerCodePrefix::Cn);
+    $customerB = Customer::factory()->create([
+        'code' => $cnB,
+        'managing_bp_id' => $tree['root']->id,
+        'name' => 'Customer B',
+    ]);
+
+    $service = app(UserManagementService::class);
+    $shared = 'SHAREDID01';
+
+    $service->create($admin, [
+        'user_type' => UserType::Bp->value,
+        'login_id' => $shared,
+        'name' => 'BP Shared Root',
+        'password' => 'Password123!',
+        'bp_id' => $tree['root']->id,
+        'role_code' => 'bp_sales',
+        'is_active' => true,
+    ]);
+    $service->create($admin, [
+        'user_type' => UserType::Bp->value,
+        'login_id' => $shared,
+        'name' => 'BP Shared Outside',
+        'password' => 'Password123!',
+        'bp_id' => $outside->id,
+        'role_code' => 'bp_sales',
+        'is_active' => true,
+    ]);
+
+    $service->create($admin, [
+        'user_type' => UserType::Customer->value,
+        'login_id' => $shared,
+        'name' => 'Customer Shared A',
+        'password' => 'Password123!',
+        'customer_id' => $customerA->id,
+        'role_code' => 'customer_owner',
+        'is_active' => true,
+    ]);
+    $service->create($admin, [
+        'user_type' => UserType::Customer->value,
+        'login_id' => $shared,
+        'name' => 'Customer Shared B',
+        'password' => 'Password123!',
+        'customer_id' => $customerB->id,
+        'role_code' => 'customer_owner',
+        'is_active' => true,
+    ]);
+
+    expect(User::query()->where('login_id', $shared)->count())->toBe(4);
+
+    expect(fn () => $service->create($admin, [
+        'user_type' => UserType::Customer->value,
+        'login_id' => $shared,
+        'name' => 'Duplicate Customer A',
+        'password' => 'Password123!',
+        'customer_id' => $customerA->id,
+        'role_code' => 'customer_member',
+        'is_active' => true,
+    ]))->toThrow(\InvalidArgumentException::class, 'このログインIDは当該組織で既に使用されています。');
+
+    expect(fn () => $service->create($admin, [
+        'user_type' => UserType::Bp->value,
+        'login_id' => $shared,
+        'name' => 'Duplicate BP Root',
+        'password' => 'Password123!',
+        'bp_id' => $tree['root']->id,
+        'role_code' => 'bp_support',
+        'is_active' => true,
+    ]))->toThrow(\InvalidArgumentException::class, 'このログインIDは当該組織で既に使用されています。');
+});
+
 it('allows bp owner to create users only within descendants', function () {
     $tree = userMgmtBpOwner();
     $outsideBpn = app(NumberSequenceService::class)->next(PartnerCodePrefix::Bpn);
@@ -127,7 +210,7 @@ it('allows bp owner to create users only within descendants', function () {
     ]))->toThrow(InvalidArgumentException::class);
 });
 
-it('rejects customer actor creating users', function () {
+it('rejects customer member without manage permission', function () {
     $tree = userMgmtBpOwner();
     $cn = app(NumberSequenceService::class)->next(PartnerCodePrefix::Cn);
     $customer = Customer::factory()->create([
@@ -146,6 +229,105 @@ it('rejects customer actor creating users', function () {
         'customer_id' => $customer->id,
         'role_code' => 'customer_member',
     ]))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+});
+
+it('allows customer owner to create users only within own cn', function () {
+    $tree = userMgmtBpOwner();
+    $cn = app(NumberSequenceService::class)->next(PartnerCodePrefix::Cn);
+    $customer = Customer::factory()->create([
+        'code' => $cn,
+        'managing_bp_id' => $tree['root']->id,
+        'name' => 'Owner Customer',
+    ]);
+    $other = Customer::factory()->create([
+        'code' => app(NumberSequenceService::class)->next(PartnerCodePrefix::Cn),
+        'managing_bp_id' => $tree['root']->id,
+        'name' => 'Other Customer',
+    ]);
+
+    $owner = User::factory()->customer($customer)->create([
+        'login_id' => 'CUSOWNER',
+        'password' => 'Password123!',
+        'is_active' => true,
+        'must_change_password' => false,
+    ]);
+    app(RbacService::class)->assignRole($owner, 'customer_owner', RoleScope::Customer, $customer->id);
+
+    $service = app(UserManagementService::class);
+
+    $created = $service->create($owner, [
+        'user_type' => UserType::Customer->value,
+        'login_id' => 'CUSMEMBER1',
+        'name' => 'Member One',
+        'password' => 'Password123!',
+        'customer_id' => $customer->id,
+        'role_code' => 'customer_member',
+    ]);
+
+    expect($created->customer_id)->toBe($customer->id)
+        ->and($created->roles->first()?->code)->toBe('customer_member')
+        ->and(AuditLog::query()->where('action', 'user.create')->where('actor_user_id', $owner->id)->exists())->toBeTrue();
+
+    expect(fn () => $service->create($owner, [
+        'user_type' => UserType::Customer->value,
+        'login_id' => 'OTHERCN',
+        'name' => 'Other',
+        'password' => 'Password123!',
+        'customer_id' => $other->id,
+        'role_code' => 'customer_member',
+    ]))->toThrow(InvalidArgumentException::class);
+
+    expect(fn () => $service->create($owner, [
+        'user_type' => UserType::Bp->value,
+        'login_id' => 'TRYBP',
+        'name' => 'BP',
+        'password' => 'Password123!',
+        'bp_id' => $tree['root']->id,
+        'role_code' => 'bp_sales',
+    ]))->toThrow(InvalidArgumentException::class);
+
+    expect(fn () => $service->delete($owner, $owner))->toThrow(InvalidArgumentException::class);
+});
+
+it('allows customer owner http user management', function () {
+    $tree = userMgmtBpOwner();
+    $cn = app(NumberSequenceService::class)->next(PartnerCodePrefix::Cn);
+    $customer = Customer::factory()->create([
+        'code' => $cn,
+        'managing_bp_id' => $tree['root']->id,
+        'name' => 'HTTP Customer Org',
+    ]);
+    $owner = User::factory()->customer($customer)->create([
+        'login_id' => 'CUSHTTPOWNER',
+        'password' => 'Password123!',
+        'is_active' => true,
+        'must_change_password' => false,
+    ]);
+    app(RbacService::class)->assignRole($owner, 'customer_owner', RoleScope::Customer, $customer->id);
+
+    $this->post(route('customer.login.store'), [
+        'login_id' => 'CUSHTTPOWNER',
+        'cn' => $customer->code,
+        'password' => 'Password123!',
+    ])->assertRedirect(route('customer.dashboard'));
+
+    $this->get(route('customer.users.index'))->assertOk()->assertSee('ユーザー管理');
+
+    $this->post(route('customer.users.store'), [
+        'login_id' => 'CUSHTTPMEM',
+        'name' => 'HTTP Member',
+        'role_code' => 'customer_member',
+        'password' => 'Password123!',
+        'password_confirmation' => 'Password123!',
+        'is_active' => '1',
+        'must_change_password' => '1',
+    ])->assertRedirect(route('customer.users.index'));
+
+    $created = User::query()->where('login_id', 'CUSHTTPMEM')->first();
+    expect($created)->not->toBeNull()
+        ->and($created->customer_id)->toBe($customer->id);
+
+    $this->get(route('customer.users.edit', $created))->assertOk()->assertSee('ユーザー編集');
 });
 
 it('updates and soft-deletes users with audit logs', function () {
@@ -244,7 +426,121 @@ it('allows bp owner http user management within scope', function () {
         'password_confirmation' => 'Password123!',
         'is_active' => '1',
         'must_change_password' => '1',
-    ])->assertRedirect(route('bp.users.index', ['tab' => 'customer']));
+    ])->assertRedirect(route('bp.customers.show', ['customer' => $customer, 'tab' => 'users']));
 
     expect(User::query()->where('login_id', 'BPHTTPCUS')->exists())->toBeTrue();
+});
+
+it('limits bp header user management to own bp and manages child users on bp detail', function () {
+    $tree = userMgmtBpOwner();
+    $childUser = User::factory()->bp($tree['child'])->create([
+        'login_id' => 'CHILDONLY',
+        'name' => 'Child Only User',
+        'password' => 'Password123!',
+        'is_active' => true,
+        'must_change_password' => false,
+    ]);
+    app(RbacService::class)->assignRole($childUser, 'bp_sales', RoleScope::Bp, $tree['child']->id);
+
+    $this->post(route('bp.login.store'), [
+        'login_id' => 'UMBPOWNER',
+        'bpn' => $tree['root']->code,
+        'password' => 'Password123!',
+    ]);
+
+    $this->get(route('bp.users.index'))
+        ->assertOk()
+        ->assertSee('自BP')
+        ->assertSee('UMBPOWNER')
+        ->assertDontSee('CHILDONLY');
+
+    $this->get(route('bp.business-partners.show', ['businessPartner' => $tree['child'], 'tab' => 'users']))
+        ->assertOk()
+        ->assertSee('ユーザー管理')
+        ->assertSee('CHILDONLY')
+        ->assertDontSee('UMBPOWNER');
+});
+
+it('lists customer users on admin and bp customer detail and returns after create', function () {
+    $admin = userMgmtAdmin(['login_id' => 'CUSDETAILADMIN']);
+    $tree = userMgmtBpOwner();
+    $cn = app(NumberSequenceService::class)->next(PartnerCodePrefix::Cn);
+    $customer = Customer::factory()->create([
+        'code' => $cn,
+        'managing_bp_id' => $tree['root']->id,
+        'name' => 'Detail Customer',
+    ]);
+    $existing = User::factory()->customer($customer)->create([
+        'login_id' => 'EXISTCUS',
+        'name' => 'Existing Customer User',
+        'password' => 'Password123!',
+        'is_active' => true,
+        'must_change_password' => false,
+    ]);
+    app(RbacService::class)->assignRole($existing, 'customer_member', RoleScope::Customer, $customer->id);
+
+    $this->post(route('admin.login.store'), [
+        'login_id' => 'CUSDETAILADMIN',
+        'password' => 'Password123!',
+    ]);
+
+    $this->get(route('admin.customers.show', ['customer' => $customer, 'tab' => 'users']))
+        ->assertOk()
+        ->assertSee('ユーザー追加')
+        ->assertSee('EXISTCUS');
+
+    $this->get(route('admin.customers.show', $customer))
+        ->assertOk()
+        ->assertSee('基本情報')
+        ->assertSee('拠点')
+        ->assertSee('価格')
+        ->assertSee('ユーザー管理')
+        ->assertSee('契約');
+
+    $this->get(route('admin.users.index', ['tab' => 'customer']))
+        ->assertOk()
+        ->assertSee('EXISTCUS');
+
+    $this->post(route('admin.users.store'), [
+        'user_type' => 'customer',
+        'login_id' => 'ADMINRETURNCUS',
+        'name' => 'Admin Return Customer',
+        'customer_id' => $customer->id,
+        'role_code' => 'customer_owner',
+        'password' => 'Password123!',
+        'password_confirmation' => 'Password123!',
+        'is_active' => '1',
+        'must_change_password' => '1',
+        'return_customer_id' => $customer->id,
+    ])->assertRedirect(route('admin.customers.show', ['customer' => $customer, 'tab' => 'users']));
+
+    expect(User::query()->where('login_id', 'ADMINRETURNCUS')->exists())->toBeTrue();
+
+    $this->post(route('admin.logout'));
+
+    $this->post(route('bp.login.store'), [
+        'login_id' => 'UMBPOWNER',
+        'bpn' => $tree['root']->code,
+        'password' => 'Password123!',
+    ])->assertRedirect(route('bp.dashboard'));
+
+    $this->get(route('bp.customers.show', ['customer' => $customer, 'tab' => 'users']))
+        ->assertOk()
+        ->assertSee('EXISTCUS')
+        ->assertSee('ADMINRETURNCUS');
+
+    $this->post(route('bp.users.store'), [
+        'user_type' => 'customer',
+        'login_id' => 'BPRETURNCUS',
+        'name' => 'BP Return Customer',
+        'customer_id' => $customer->id,
+        'role_code' => 'customer_member',
+        'password' => 'Password123!',
+        'password_confirmation' => 'Password123!',
+        'is_active' => '1',
+        'must_change_password' => '1',
+        'return_customer_id' => $customer->id,
+    ])->assertRedirect(route('bp.customers.show', ['customer' => $customer, 'tab' => 'users']));
+
+    expect(User::query()->where('login_id', 'BPRETURNCUS')->exists())->toBeTrue();
 });

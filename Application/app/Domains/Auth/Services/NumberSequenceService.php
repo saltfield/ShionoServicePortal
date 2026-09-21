@@ -15,9 +15,9 @@ class NumberSequenceService
     private const MAX_SEQ = 999;
 
     /**
-     * Issue the next code for the given prefix (BPN / CN / CTR / ITEM).
+     * Issue the next code for the given prefix (BPN / CN / CTR / ITEM / INV / TKT).
      *
-     * Format: {PREFIX}{YYYYMM}{3-digit sequence} e.g. BPN202609001
+     * Format: {PREFIX}{YYYYMM}{3-digit sequence} e.g. BPN202609001 / TKT202609001
      * Item only: {YYMM}{3-digit sequence} e.g. 2609001 (7 digits, no prefix)
      */
     public function next(PartnerCodePrefix|string $prefix, ?CarbonInterface $at = null): string

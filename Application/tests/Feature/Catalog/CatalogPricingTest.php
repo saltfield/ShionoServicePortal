@@ -150,15 +150,57 @@ it('sets customer price and falls back to user_price', function () {
     expect($service->resolveCustomerAmount($item, $customer, $root))->toBe('2800');
 });
 
-it('rejects item mutation by bp user', function () {
+it('allows bp to create owned service but not catalog item', function () {
     $seq = app(NumberSequenceService::class);
     $hierarchy = app(BpHierarchyService::class);
     $root = $hierarchy->createRoot($seq->next(PartnerCodePrefix::Bpn), 'Root');
     $bpUser = User::factory()->bp($root)->create();
     app(RbacService::class)->assignRole($bpUser, 'bp_owner', RoleScope::Bp, $root->id);
 
-    expect(fn () => app(CatalogPricingService::class)->createItem($bpUser, [
-        'name' => 'NG',
+    $owned = app(CatalogPricingService::class)->createItem($bpUser, [
+        'name' => 'BP独自サポート',
+        'billing_type' => BillingType::Running->value,
+        'partition_price' => 500,
+        'recommended_price' => 800,
+        'user_price' => 1000,
+        'owning_bp_id' => $root->id,
+    ]);
+
+    expect($owned->owning_bp_id)->toBe($root->id)
+        ->and($owned->isBpOwned())->toBeTrue();
+
+    $admin = catalogAdmin();
+    $catalog = app(CatalogPricingService::class)->createItem($admin, [
+        'name' => '標準回線',
+        'billing_type' => BillingType::Running->value,
+        'partition_price' => 1000,
+        'user_price' => 2000,
+    ]);
+
+    expect(fn () => app(CatalogPricingService::class)->updateItem($bpUser, $catalog, [
+        'name' => '改ざん',
+        'billing_type' => BillingType::Running->value,
+    ]))->toThrow(InvalidArgumentException::class, '標準品目は編集できません');
+});
+
+it('allows bp to set wholesale for owned and catalog items', function () {
+    $seq = app(NumberSequenceService::class);
+    $hierarchy = app(BpHierarchyService::class);
+    $root = $hierarchy->createRoot($seq->next(PartnerCodePrefix::Bpn), 'Root');
+    $child = $hierarchy->createChild($root, $seq->next(PartnerCodePrefix::Bpn), 'Child');
+    $bpUser = User::factory()->bp($root)->create();
+    app(RbacService::class)->assignRole($bpUser, 'bp_owner', RoleScope::Bp, $root->id);
+
+    $service = app(CatalogPricingService::class);
+    $owned = $service->createItem($bpUser, [
+        'name' => '独自',
         'billing_type' => BillingType::Initial->value,
-    ]))->toThrow(InvalidArgumentException::class, '管理者のみ');
+        'partition_price' => 700,
+        'user_price' => 900,
+        'owning_bp_id' => $root->id,
+    ]);
+
+    $price = $service->upsertWholesalePrice($bpUser, $owned, $root, $child, 650);
+    expect($price->amount)->toBe(650)
+        ->and($service->resolveWholesaleAmount($owned, $root, $child))->toBe('650');
 });

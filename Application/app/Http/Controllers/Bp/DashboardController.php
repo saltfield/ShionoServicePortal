@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Bp;
 
 use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Contract\Enums\ApplicationStatus;
-use App\Domains\Support\Enums\InquiryStatus;
 use App\Domains\Support\Services\AnnouncementService;
 use App\Domains\Support\Services\InquiryService;
 use App\Http\Controllers\Controller;
@@ -26,9 +25,7 @@ class DashboardController extends Controller
             : [];
 
         return view('bp.dashboard', [
-            'openInquiryCount' => $inquiries->visibleQuery($actor)
-                ->whereIn('status', [InquiryStatus::Open->value, InquiryStatus::InProgress->value])
-                ->count(),
+            'unreadTicketCount' => $inquiries->unreadCount($actor),
             'unreadAnnouncementCount' => $announcements->unreadCount($actor),
             'pendingApplicationCount' => Application::query()
                 ->where('status', ApplicationStatus::Pending->value)

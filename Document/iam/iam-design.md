@@ -188,6 +188,7 @@ User ──< UserRole >── Role ──< RolePermission >── Permission
 | bp_owner | bp | BP責任者 |
 | bp_sales | bp | 営業 |
 | bp_support | bp | 問い合わせ対応 |
+| customer_owner | customer | 自CNユーザー管理・契約・請求・問い合わせ |
 | customer_member | customer | 契約・請求の閲覧、問い合わせ起票 |
 
 ### `user_roles`
@@ -346,7 +347,8 @@ Phase 2 で Seeder 投入。
 2. `bp_owner` … BP配下の顧客・契約・価格・問い合わせ・お知らせ
 3. `bp_sales` … 契約・価格（閲覧/作成中心）
 4. `bp_support` … 問い合わせ中心
-5. `customer_member` … 自己契約・請求閲覧、問い合わせ起票、PDFダウンロード
+5. `customer_owner` … 自CNユーザー管理（`iam.user.manage`）＋メンバー相当
+6. `customer_member` … 自己契約・請求閲覧、問い合わせ起票、PDFダウンロード
 
 ポリシー P1〜P5 相当をシードし、テストで固定。
 

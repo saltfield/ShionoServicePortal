@@ -6,10 +6,14 @@ use App\Domains\Auth\Enums\TwoFactorMode;
 use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Bp\Services\OrganizationMasterService;
 use App\Domains\Iam\Services\AuthorizationService;
+use App\Domains\Iam\Services\RbacService;
+use App\Domains\Support\Services\InquiryService;
 use App\Http\Controllers\Concerns\ConfirmsBusinessPartnerDeletion;
 use App\Http\Controllers\Concerns\ConfirmsBusinessPartnerMove;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
+use App\Models\Customer;
+use App\Models\User;
 use App\Support\ContactFieldRules;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -87,10 +91,29 @@ class BusinessPartnerController extends Controller
             ->with('status', "{$partner->code} を作成しました。");
     }
 
-    public function show(Request $request, BusinessPartner $businessPartner, AuthorizationService $authorization): View
+    public function show(Request $request, BusinessPartner $businessPartner, AuthorizationService $authorization, RbacService $rbac, InquiryService $inquiries): View
     {
         $authorization->authorize($request->user('admin'), 'bp.view');
         $businessPartner->load(['parent', 'children']);
+        $actor = $request->user('admin');
+        $canManageUsers = $rbac->hasPermission($actor, 'iam.user.manage');
+        $canViewCustomers = $rbac->hasPermission($actor, 'customer.view');
+        $canManageCustomers = $rbac->hasPermission($actor, 'customer.manage');
+        $canViewTickets = $rbac->hasPermission($actor, 'inquiry.view');
+        $activeTab = match ($request->input('tab')) {
+            'users' => $canManageUsers ? 'users' : 'overview',
+            'customers' => $canViewCustomers ? 'customers' : 'overview',
+            'tickets' => $canViewTickets ? 'tickets' : 'overview',
+            default => 'overview',
+        };
+
+        $bpTickets = collect();
+        if ($activeTab === 'tickets' && $canViewTickets) {
+            $bpTickets = $inquiries->adminBpReceivedQuery($businessPartner)
+                ->latest('updated_at')
+                ->paginate(20)
+                ->withQueryString();
+        }
 
         return view('admin.business-partners.show', [
             'partner' => $businessPartner,
@@ -100,8 +123,21 @@ class BusinessPartnerController extends Controller
                 ->orderBy('code')
                 ->get(),
             'modes' => TwoFactorMode::cases(),
+            'routePrefix' => 'admin',
             'deleteConfirmationCode' => $this->issueBusinessPartnerDeleteConfirmationCode($businessPartner),
             'moveConfirmationCode' => $this->issueBusinessPartnerMoveConfirmationCode($businessPartner),
+            'canManageUsers' => $canManageUsers,
+            'canViewCustomers' => $canViewCustomers,
+            'canManageCustomers' => $canManageCustomers,
+            'canViewTickets' => $canViewTickets,
+            'bpUsers' => $canManageUsers
+                ? User::query()->with('roles')->where('bp_id', $businessPartner->id)->orderBy('login_id')->get()
+                : collect(),
+            'bpCustomers' => $canViewCustomers
+                ? Customer::query()->where('managing_bp_id', $businessPartner->id)->orderBy('code')->get()
+                : collect(),
+            'bpTickets' => $bpTickets,
+            'activeTab' => $activeTab,
         ]);
     }
 

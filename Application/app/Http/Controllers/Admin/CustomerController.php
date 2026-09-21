@@ -7,6 +7,8 @@ use App\Domains\Auth\Enums\TwoFactorMode;
 use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Bp\Services\OrganizationMasterService;
 use App\Domains\Iam\Services\AuthorizationService;
+use App\Domains\Iam\Services\RbacService;
+use App\Domains\Support\Services\InquiryService;
 use App\Http\Controllers\Concerns\ConfirmsCustomerDeletion;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
@@ -33,17 +35,12 @@ class CustomerController extends Controller
 
         $customers = Customer::query()
             ->with('managingBp')
-            ->when($managingBpId === null, fn ($q) => $q->whereRaw('1 = 0'))
-            ->when($managingBpId !== null, function ($query) use ($managingBpId, $cn, $cnName) {
-                $query->where('managing_bp_id', $managingBpId);
-                if ($cn !== '') {
-                    $normalized = IdentifierNormalizer::normalize($cn);
-                    $query->where('code', 'like', "%{$normalized}%");
-                }
-                if ($cnName !== '') {
-                    $query->where('name', 'like', "%{$cnName}%");
-                }
+            ->when($managingBpId !== null, fn ($query) => $query->where('managing_bp_id', $managingBpId))
+            ->when($cn !== '', function ($query) use ($cn) {
+                $normalized = IdentifierNormalizer::normalize($cn);
+                $query->where('code', 'like', "%{$normalized}%");
             })
+            ->when($cnName !== '', fn ($query) => $query->where('name', 'like', "%{$cnName}%"))
             ->orderBy('code')
             ->paginate(20)
             ->withQueryString();
@@ -79,18 +76,48 @@ class CustomerController extends Controller
         $customer = $service->createCustomer($request->user('admin'), $managingBp, $validated);
 
         return redirect()
-            ->route('admin.customers.show', $customer)
+            ->route('admin.customers.show', ['customer' => $customer, 'tab' => 'overview'])
             ->with('status', "{$customer->code} を作成しました。");
     }
 
-    public function show(Request $request, Customer $customer, AuthorizationService $authorization): View
+    public function show(Request $request, Customer $customer, AuthorizationService $authorization, RbacService $rbac, InquiryService $inquiries): View
     {
         $authorization->authorize($request->user('admin'), 'customer.view');
         $customer->load(['managingBp', 'sites']);
 
+        $actor = $request->user('admin');
+        $canManageUsers = $rbac->hasPermission($actor, 'iam.user.manage');
+        $canViewContracts = $rbac->hasPermission($actor, 'contract.view');
+        $canCreateContracts = $rbac->hasPermission($actor, 'contract.create');
+        $canViewTickets = $rbac->hasPermission($actor, 'inquiry.view');
+        $customerUsers = $canManageUsers
+            ? $customer->users()->with('roles')->orderBy('login_id')->get()
+            : collect();
+        $customerContracts = $canViewContracts
+            ? $customer->contracts()->with(['site', 'owningBp'])->latest()->get()
+            : collect();
+
+        $activeTab = $this->resolveCustomerShowTab($request, $canManageUsers, $canViewContracts, $canViewTickets);
+        $customerTickets = collect();
+        if ($activeTab === 'tickets' && $canViewTickets) {
+            $customerTickets = $inquiries->adminCustomerTicketsQuery($customer)
+                ->latest('updated_at')
+                ->paginate(20)
+                ->withQueryString();
+        }
+
         return view('admin.customers.show', [
             'customer' => $customer,
             'deleteConfirmationCode' => $this->issueCustomerDeleteConfirmationCode($customer),
+            'canManageUsers' => $canManageUsers,
+            'canViewContracts' => $canViewContracts,
+            'canCreateContracts' => $canCreateContracts,
+            'canViewTickets' => $canViewTickets,
+            'customerUsers' => $customerUsers,
+            'customerContracts' => $customerContracts,
+            'customerTickets' => $customerTickets,
+            'activeTab' => $activeTab,
+            'routePrefix' => 'admin',
         ]);
     }
 
@@ -111,7 +138,7 @@ class CustomerController extends Controller
         $service->updateCustomer($request->user('admin'), $customer, $validated);
 
         return redirect()
-            ->route('admin.customers.show', $customer)
+            ->route('admin.customers.show', ['customer' => $customer, 'tab' => 'overview'])
             ->with('status', 'カスタマー情報を更新しました。');
     }
 
@@ -128,6 +155,27 @@ class CustomerController extends Controller
         return redirect()
             ->route('admin.customers.index', ['managing_bp_id' => $customer->managing_bp_id])
             ->with('status', 'カスタマーを削除しました。');
+    }
+
+    private function resolveCustomerShowTab(
+        Request $request,
+        bool $canManageUsers,
+        bool $canViewContracts,
+        bool $canViewTickets = false,
+    ): string {
+        $tab = (string) $request->input('tab', 'overview');
+        $allowed = ['overview', 'sites', 'prices'];
+        if ($canManageUsers) {
+            $allowed[] = 'users';
+        }
+        if ($canViewContracts) {
+            $allowed[] = 'contracts';
+        }
+        if ($canViewTickets) {
+            $allowed[] = 'tickets';
+        }
+
+        return in_array($tab, $allowed, true) ? $tab : 'overview';
     }
 
     private function validatedCustomer(Request $request, bool $requireManagingBp = true): array

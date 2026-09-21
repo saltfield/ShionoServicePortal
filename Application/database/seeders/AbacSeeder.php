@@ -73,7 +73,7 @@ class AbacSeeder extends Seeder
 
         $this->seedPolicy(
             code: 'P4_closed_inquiry_deny_reply',
-            name: 'クローズ済み問い合わせへの返信を拒否（reopen権限者以外）',
+            name: 'クローズ済みチケットへの返信を拒否（reopen権限者以外）',
             effect: 'deny',
             resource: 'inquiry',
             action: 'inquiry.reply',
@@ -81,6 +81,18 @@ class AbacSeeder extends Seeder
             conditions: [
                 ['group_no' => 1, 'attribute' => 'resource.status', 'operator' => 'eq', 'value_json' => 'closed'],
                 ['group_no' => 2, 'attribute' => 'subject.permission_codes', 'operator' => 'not_contains', 'value_json' => 'inquiry.reopen'],
+            ],
+        );
+
+        $this->seedPolicy(
+            code: 'P4b_withdrawn_inquiry_deny_reply',
+            name: '取下げ済みチケットへの返信を拒否',
+            effect: 'deny',
+            resource: 'inquiry',
+            action: 'inquiry.reply',
+            priority: 200,
+            conditions: [
+                ['group_no' => 1, 'attribute' => 'resource.status', 'operator' => 'eq', 'value_json' => 'withdrawn'],
             ],
         );
 

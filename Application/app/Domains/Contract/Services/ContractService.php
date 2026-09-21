@@ -6,6 +6,7 @@ use App\Domains\Auth\Enums\PartnerCodePrefix;
 use App\Domains\Auth\Enums\UserType;
 use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Auth\Services\NumberSequenceService;
+use App\Domains\Catalog\Enums\BillingType;
 use App\Domains\Catalog\Services\CatalogPricingService;
 use App\Domains\Contract\Enums\ApplicationStatus;
 use App\Domains\Contract\Enums\ApplicationType;
@@ -19,9 +20,11 @@ use App\Models\Contract;
 use App\Models\ContractItem;
 use App\Models\ContractItemData;
 use App\Models\ContractItemDocument;
+use App\Models\ContractMessage;
 use App\Models\ContractStatusHistory;
 use App\Models\Customer;
 use App\Models\DataFieldName;
+use App\Models\Invoice;
 use App\Models\Item;
 use App\Models\ItemDocument;
 use App\Models\Site;
@@ -72,9 +75,15 @@ class ContractService
             throw new InvalidArgumentException('無効な品目が含まれています。');
         }
 
+        $owningBp = $customer->managingBp;
+        foreach ($items as $item) {
+            if ($item->owning_bp_id !== null && (int) $item->owning_bp_id !== (int) $owningBp->id) {
+                throw new InvalidArgumentException('他BPの独自サービスは契約に含められません。');
+            }
+        }
+
         $this->assertRequiredItemsSatisfied($items);
 
-        $owningBp = $customer->managingBp;
         $parentBp = $owningBp->parent;
 
         return DB::transaction(function () use ($actor, $site, $customer, $owningBp, $parentBp, $items) {
@@ -284,6 +293,10 @@ class ContractService
             'owner_bp_id' => $contract->owning_bp_id,
         ]);
 
+        if ($actor->user_type === UserType::Bp && (int) $actor->bp_id !== (int) $contract->owning_bp_id) {
+            throw new InvalidArgumentException('価格変更申請は契約の管理BPのみ行えます。');
+        }
+
         if (! in_array($contract->status, [ContractStatus::Approved, ContractStatus::Activated], true)) {
             throw new InvalidArgumentException('承認後の契約のみ価格変更申請できます。');
         }
@@ -380,7 +393,7 @@ class ContractService
         });
     }
 
-    public function activate(User $actor, Contract $contract): Contract
+    public function activate(User $actor, Contract $contract, string $firstBillingYearMonth): Contract
     {
         $this->ensureContractScope($actor, $contract);
         $this->authorization->authorize($actor, 'contract.create', [
@@ -388,16 +401,198 @@ class ContractService
             'owner_bp_id' => $contract->owning_bp_id,
         ]);
 
-        if ($contract->status !== ContractStatus::Approved) {
-            throw new InvalidArgumentException('承認済の契約のみ開通できます。');
+        if ($actor->user_type === UserType::Customer) {
+            throw new InvalidArgumentException('カスタマーはサービス提供を確定できません。');
         }
 
+        if ($contract->status !== ContractStatus::Approved) {
+            throw new InvalidArgumentException('承認済の契約のみサービス提供開始にできます。');
+        }
+
+        $firstBillingYearMonth = $this->normalizeYearMonth($firstBillingYearMonth);
+
+        $contract->loadMissing('items.item');
+        $minTerm = $contract->items
+            ->map(fn (ContractItem $line) => (int) ($line->item?->minimum_term_months ?? 0))
+            ->filter(fn (int $months) => $months > 0)
+            ->max();
+
         $contract->activated_at = now();
-        $this->transition($contract, ContractStatus::Activated, $actor, '開通');
+        $contract->first_billing_year_month = $firstBillingYearMonth;
+        $contract->minimum_term_months_snapshot = $minTerm ?: null;
+        $this->transition($contract, ContractStatus::Activated, $actor, 'サービス提供開始');
         $this->issueDocumentsForContract($contract);
-        $this->audit($actor, 'contract.activate', $contract);
+        $this->audit($actor, 'contract.activate', $contract, [
+            'first_billing_year_month' => $firstBillingYearMonth,
+        ]);
 
         return $contract->fresh();
+    }
+
+    public function revertServiceProvided(User $actor, Contract $contract): Contract
+    {
+        $this->ensureContractScope($actor, $contract);
+        $this->authorization->authorize($actor, 'contract.create', [
+            'resource_type' => 'contract',
+            'owner_bp_id' => $contract->owning_bp_id,
+        ]);
+
+        if ($actor->user_type === UserType::Customer) {
+            throw new InvalidArgumentException('カスタマーはステータスを戻せません。');
+        }
+
+        if ($contract->status !== ContractStatus::Activated) {
+            throw new InvalidArgumentException('サービス提供開始の契約のみ承認済へ戻せます。');
+        }
+
+        if (Invoice::query()->where('contract_id', $contract->id)->exists()) {
+            throw new InvalidArgumentException('請求が発行済みのためステータスを戻せません。');
+        }
+
+        $contract->activated_at = null;
+        $this->transition($contract, ContractStatus::Approved, $actor, 'サービス提供の取消（戻し）');
+        $this->audit($actor, 'contract.activate.revert', $contract);
+
+        return $contract->fresh();
+    }
+
+    /**
+     * @return array{suggested_amount: int, remaining_months: int, minimum_term_months: int, elapsed_months: int}
+     */
+    public function suggestCancellationAmount(Contract $contract, string $finalBillingYearMonth): array
+    {
+        $finalBillingYearMonth = $this->normalizeYearMonth($finalBillingYearMonth);
+        $contract->loadMissing('items.item');
+
+        $startYm = $contract->first_billing_year_month
+            ?: ($contract->activated_at?->timezone(config('app.timezone'))->format('Ym'));
+        if (! $startYm) {
+            throw new InvalidArgumentException('初回請求月が未設定のため残期間を計算できません。');
+        }
+
+        $elapsed = $this->monthsBetweenInclusive($startYm, $finalBillingYearMonth);
+        $minTerm = (int) ($contract->minimum_term_months_snapshot
+            ?: $contract->items
+                ->map(fn (ContractItem $line) => (int) ($line->item?->minimum_term_months ?? 0))
+                ->filter(fn (int $months) => $months > 0)
+                ->max()
+            ?: 0);
+
+        $remaining = max(0, $minTerm - $elapsed);
+        $suggested = 0;
+        foreach ($contract->items as $line) {
+            if ($line->item?->billing_type !== BillingType::Running) {
+                continue;
+            }
+            $term = (int) ($line->item->minimum_term_months ?? 0);
+            if ($term <= 0) {
+                continue;
+            }
+            $lineRemaining = max(0, $term - $elapsed);
+            $suggested += (int) $line->unit_price * $lineRemaining;
+        }
+
+        return [
+            'suggested_amount' => $suggested,
+            'remaining_months' => $remaining,
+            'minimum_term_months' => $minTerm,
+            'elapsed_months' => $elapsed,
+        ];
+    }
+
+    public function cancel(User $actor, Contract $contract, string $finalBillingYearMonth, int $cancellationAmount, ?string $note = null): Contract
+    {
+        $this->ensureContractScope($actor, $contract);
+        $this->authorization->authorize($actor, 'contract.create', [
+            'resource_type' => 'contract',
+            'owner_bp_id' => $contract->owning_bp_id,
+        ]);
+
+        if ($actor->user_type === UserType::Customer) {
+            throw new InvalidArgumentException('カスタマーは解約できません。');
+        }
+
+        if ($contract->status !== ContractStatus::Activated) {
+            throw new InvalidArgumentException('サービス提供開始の契約のみ解約できます。');
+        }
+
+        $finalBillingYearMonth = $this->normalizeYearMonth($finalBillingYearMonth);
+        if ($cancellationAmount < 0) {
+            throw new InvalidArgumentException('解約金額は0以上で入力してください。');
+        }
+
+        $contract->final_billing_year_month = $finalBillingYearMonth;
+        $contract->cancellation_amount = $cancellationAmount;
+        $contract->cancellation_note = $note ? mb_substr($note, 0, 500) : null;
+        $contract->cancelled_at = now();
+        $this->transition($contract, ContractStatus::Cancelled, $actor, '解約');
+        $this->audit($actor, 'contract.cancel', $contract, [
+            'final_billing_year_month' => $finalBillingYearMonth,
+            'cancellation_amount' => $cancellationAmount,
+        ]);
+
+        return $contract->fresh();
+    }
+
+    public function postMessage(User $actor, Contract $contract, string $body): ContractMessage
+    {
+        $this->ensureContractScope($actor, $contract);
+        $this->authorization->authorize($actor, 'contract.view', [
+            'resource_type' => 'contract',
+            'owner_bp_id' => $contract->owning_bp_id,
+        ]);
+
+        if (in_array($contract->status, [ContractStatus::Activated, ContractStatus::Cancelled], true)) {
+            throw new InvalidArgumentException('サービス提供開始後はメッセージを投稿できません。');
+        }
+
+        $body = trim($body);
+        if ($body === '') {
+            throw new InvalidArgumentException('メッセージを入力してください。');
+        }
+        if (mb_strlen($body) > 2000) {
+            throw new InvalidArgumentException('メッセージは2000文字以内で入力してください。');
+        }
+
+        $message = ContractMessage::query()->create([
+            'contract_id' => $contract->id,
+            'user_id' => $actor->id,
+            'body' => $body,
+        ]);
+
+        $this->audit($actor, 'contract.message.create', $contract, ['message_id' => $message->id]);
+
+        return $message;
+    }
+
+    public function canPostMessages(Contract $contract): bool
+    {
+        return ! in_array($contract->status, [ContractStatus::Activated, ContractStatus::Cancelled], true);
+    }
+
+    private function normalizeYearMonth(string $yearMonth): string
+    {
+        $normalized = preg_replace('/\D+/', '', $yearMonth) ?? '';
+        if (! preg_match('/^\d{6}$/', $normalized)) {
+            throw new InvalidArgumentException('請求月は YYYYMM 形式で入力してください。');
+        }
+        $month = (int) substr($normalized, 4, 2);
+        if ($month < 1 || $month > 12) {
+            throw new InvalidArgumentException('請求月の月が不正です。');
+        }
+
+        return $normalized;
+    }
+
+    private function monthsBetweenInclusive(string $startYm, string $endYm): int
+    {
+        $start = ((int) substr($startYm, 0, 4)) * 12 + ((int) substr($startYm, 4, 2));
+        $end = ((int) substr($endYm, 0, 4)) * 12 + ((int) substr($endYm, 4, 2));
+        if ($end < $start) {
+            throw new InvalidArgumentException('最終請求月は初回請求月以降を指定してください。');
+        }
+
+        return $end - $start + 1;
     }
 
     public function regenerateDocuments(User $actor, Contract $contract): Contract
@@ -412,10 +607,55 @@ class ContractService
             throw new InvalidArgumentException('承認後の契約のみドキュメントを再生成できます。');
         }
 
-        $this->issueDocumentsForContract($contract);
-        $this->audit($actor, 'contract.documents.regenerate', $contract);
+        $result = $this->issueDocumentsForContract($contract);
+        if ($result['template_count'] === 0) {
+            throw new InvalidArgumentException(
+                'この契約の品目に Document テンプレートがありません。品目詳細でテンプレートを登録してから再度実行してください。'
+            );
+        }
+        if ($result['generated'] === 0) {
+            $detail = $result['failures'] !== []
+                ? implode(' / ', array_slice($result['failures'], 0, 3))
+                : '原因不明';
+            throw new InvalidArgumentException('Document の生成に失敗しました: '.$detail);
+        }
+
+        $this->audit($actor, 'contract.documents.regenerate', $contract, [
+            'generated' => $result['generated'],
+            'failed' => count($result['failures']),
+        ]);
 
         return $contract->fresh(['items.documents']);
+    }
+
+    public function deleteContractItemDocument(User $actor, ContractItemDocument $document): void
+    {
+        $document->loadMissing('contractItem.contract');
+        $contract = $document->contractItem?->contract;
+        abort_unless($contract, 404);
+
+        $this->ensureContractScope($actor, $contract);
+        $this->authorization->authorize($actor, 'contract.create', [
+            'resource_type' => 'contract',
+            'owner_bp_id' => $contract->owning_bp_id,
+        ]);
+
+        if (! in_array($contract->status, [ContractStatus::Approved, ContractStatus::Activated, ContractStatus::Cancelled], true)) {
+            throw new InvalidArgumentException('この状態の契約ではドキュメントを削除できません。');
+        }
+
+        if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
+            Storage::disk('local')->delete($document->file_path);
+        }
+
+        $meta = [
+            'contract_id' => $contract->id,
+            'contract_item_id' => $document->contract_item_id,
+            'title' => $document->title,
+        ];
+        $document->delete();
+
+        $this->audit($actor, 'contract.document.delete', $contract, $meta);
     }
 
     public function upsertItemData(User $actor, ContractItem $contractItem, array $rows): void
@@ -488,12 +728,29 @@ class ContractService
 
     public function addItemDocument(User $actor, Item $item, string $title, UploadedFile $file): ItemDocument
     {
-        if ($actor->user_type !== UserType::Admin) {
-            throw new InvalidArgumentException('Documentテンプレートは管理者のみ登録できます。');
+        $owningBpId = null;
+        if ($actor->user_type === UserType::Admin) {
+            $this->authorization->authorize($actor, 'item.manage');
+        } elseif ($actor->user_type === UserType::Bp) {
+            $this->authorization->authorize($actor, 'contract.create');
+            $actorBp = $actor->businessPartner;
+            abort_unless($actorBp, 403);
+            if ($item->isBpOwned() && (int) $item->owning_bp_id !== (int) $actorBp->id) {
+                throw new InvalidArgumentException('他BPの独自サービスには Document を登録できません。');
+            }
+            $owningBpId = $actorBp->id;
+        } else {
+            throw new InvalidArgumentException('Documentテンプレートを登録する権限がありません。');
         }
-        $this->authorization->authorize($actor, 'item.manage');
 
-        if ($item->documents()->count() >= self::MAX_ITEM_DOCUMENTS) {
+        $scopedCount = $item->documents()
+            ->when(
+                $owningBpId === null,
+                fn ($q) => $q->whereNull('owning_bp_id'),
+                fn ($q) => $q->where('owning_bp_id', $owningBpId)
+            )
+            ->count();
+        if ($scopedCount >= self::MAX_ITEM_DOCUMENTS) {
             throw new InvalidArgumentException('Documentテンプレートは最大'.self::MAX_ITEM_DOCUMENTS.'件までです。');
         }
 
@@ -508,6 +765,7 @@ class ContractService
 
         return ItemDocument::query()->create([
             'item_id' => $item->id,
+            'owning_bp_id' => $owningBpId,
             'title' => $title,
             'file_path' => $path,
             'original_name' => $file->getClientOriginalName(),
@@ -516,15 +774,87 @@ class ContractService
         ]);
     }
 
-    public function issueDocumentsForContract(Contract $contract): void
+    /**
+     * テンプレートを削除する。契約へ発行済みの PDF は残し、参照のみ外す。
+     * 再生成時は「現時点のテンプレート」だけで PDF を追加・更新する。
+     */
+    public function deleteItemDocument(User $actor, ItemDocument $document): void
+    {
+        $document->loadMissing('item');
+
+        if ($actor->user_type === UserType::Admin) {
+            $this->authorization->authorize($actor, 'item.manage');
+        } elseif ($actor->user_type === UserType::Bp) {
+            $this->authorization->authorize($actor, 'contract.create');
+            $actorBp = $actor->businessPartner;
+            abort_unless($actorBp, 403);
+            if ($document->owning_bp_id === null || (int) $document->owning_bp_id !== (int) $actorBp->id) {
+                throw new InvalidArgumentException('標準テンプレート、または他BPのテンプレートは削除できません。');
+            }
+            $item = $document->item;
+            if ($item && $item->isBpOwned() && (int) $item->owning_bp_id !== (int) $actorBp->id) {
+                throw new InvalidArgumentException('他BPの独自サービスに紐づくテンプレートは削除できません。');
+            }
+        } else {
+            throw new InvalidArgumentException('Documentテンプレートを削除する権限がありません。');
+        }
+
+        // 発行済み PDF のファイルは消さず、テンプレート参照だけ外す（FK の SET NULL と同等を明示）
+        ContractItemDocument::query()
+            ->where('item_document_id', $document->id)
+            ->update(['item_document_id' => null]);
+
+        if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
+            Storage::disk('local')->delete($document->file_path);
+        }
+
+        $meta = [
+            'item_id' => $document->item_id,
+            'title' => $document->title,
+            'owning_bp_id' => $document->owning_bp_id,
+        ];
+        $document->delete();
+
+        $this->auditLogger->log(
+            category: 'catalog',
+            action: 'item.document.delete',
+            result: 'success',
+            actor: $actor,
+            targetType: ItemDocument::class,
+            targetId: $meta['item_id'],
+            meta: $meta,
+        );
+    }
+
+    /**
+     * 現時点のテンプレートから PDF を追加・更新する。
+     * 削除済みテンプレート由来の発行済み PDF（item_document_id = null）は残す。
+     *
+     * @return array{template_count: int, generated: int, failures: list<string>}
+     */
+    public function issueDocumentsForContract(Contract $contract): array
     {
         $contract->loadMissing('items.item.documents', 'items.documents', 'items.dataRows.dataFieldName', 'customer', 'site', 'owningBp');
+        $owningBpId = (int) $contract->owning_bp_id;
+        $templateCount = 0;
+        $generated = 0;
+        $failures = [];
 
         foreach ($contract->items as $line) {
-            foreach ($line->item->documents as $doc) {
+            if ($line->item === null) {
+                continue;
+            }
+
+            $templates = $line->item->documents
+                ->filter(fn (ItemDocument $doc) => $doc->owning_bp_id === null || (int) $doc->owning_bp_id === $owningBpId)
+                ->values();
+            $templateCount += $templates->count();
+
+            foreach ($templates as $doc) {
                 try {
                     $rendered = $this->documentRender->renderPdf($line, $doc);
                 } catch (Throwable $exception) {
+                    $failures[] = ($line->item->code ?? '品目').'/'.$doc->title.': '.$exception->getMessage();
                     $this->auditLogger->log(
                         'contract',
                         'contract.document.render_failed',
@@ -542,31 +872,59 @@ class ContractService
                     continue;
                 }
 
-                $target = 'contract-documents/'.$contract->id.'/'.$line->id.'/'.$doc->id.'.pdf';
-                Storage::disk('local')->put($target, $rendered['binary']);
+                try {
+                    $existing = $line->documents()->where('item_document_id', $doc->id)->first();
+                    $attrs = [
+                        'title' => $doc->title,
+                        'original_name' => pathinfo($doc->original_name ?: $doc->title, PATHINFO_FILENAME).'.pdf',
+                        'mime_type' => 'application/pdf',
+                    ];
 
-                $existing = $line->documents()->where('item_document_id', $doc->id)->first();
-                $attrs = [
-                    'title' => $doc->title,
-                    'file_path' => $target,
-                    'original_name' => pathinfo($doc->original_name ?: $doc->title, PATHINFO_FILENAME).'.pdf',
-                    'mime_type' => 'application/pdf',
-                ];
-
-                if ($existing) {
-                    if ($existing->file_path !== $target && Storage::disk('local')->exists($existing->file_path)) {
-                        Storage::disk('local')->delete($existing->file_path);
+                    if ($existing) {
+                        // 同一テンプレートの再生成は上書き。過去テンプレート由来の別レコードは触らない。
+                        $target = $existing->file_path
+                            ?: 'contract-documents/'.$contract->id.'/'.$line->id.'/'.$existing->id.'.pdf';
+                        Storage::disk('local')->put($target, $rendered['binary']);
+                        $existing->update([
+                            ...$attrs,
+                            'file_path' => $target,
+                        ]);
+                    } else {
+                        $created = ContractItemDocument::query()->create([
+                            'contract_item_id' => $line->id,
+                            'item_document_id' => $doc->id,
+                            'file_path' => 'pending',
+                            ...$attrs,
+                        ]);
+                        $target = 'contract-documents/'.$contract->id.'/'.$line->id.'/'.$created->id.'.pdf';
+                        Storage::disk('local')->put($target, $rendered['binary']);
+                        $created->update(['file_path' => $target]);
                     }
-                    $existing->update($attrs);
-                } else {
-                    ContractItemDocument::query()->create([
-                        'contract_item_id' => $line->id,
-                        'item_document_id' => $doc->id,
-                        ...$attrs,
-                    ]);
+                    $generated++;
+                } catch (Throwable $exception) {
+                    $failures[] = ($line->item->code ?? '品目').'/'.$doc->title.': '.$exception->getMessage();
+                    $this->auditLogger->log(
+                        'contract',
+                        'contract.document.store_failed',
+                        'failure',
+                        null,
+                        targetType: Contract::class,
+                        targetId: $contract->id,
+                        meta: [
+                            'contract_item_id' => $line->id,
+                            'item_document_id' => $doc->id,
+                            'message' => $exception->getMessage(),
+                        ],
+                    );
                 }
             }
         }
+
+        return [
+            'template_count' => $templateCount,
+            'generated' => $generated,
+            'failures' => $failures,
+        ];
     }
 
     private function assertRequiredItemsSatisfied($items): void

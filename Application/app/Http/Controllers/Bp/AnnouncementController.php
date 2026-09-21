@@ -6,6 +6,7 @@ use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Iam\Services\RbacService;
 use App\Domains\Support\Services\AnnouncementService;
 use App\Http\Controllers\Concerns\ConfirmsAnnouncementDeletion;
+use App\Http\Controllers\Concerns\HandlesAnnouncementForm;
 use App\Http\Controllers\Controller;
 use App\Models\Announcement;
 use App\Models\BusinessPartner;
@@ -19,6 +20,7 @@ use InvalidArgumentException;
 class AnnouncementController extends Controller
 {
     use ConfirmsAnnouncementDeletion;
+    use HandlesAnnouncementForm;
 
     public function index(Request $request, AnnouncementService $service, RbacService $rbac): View
     {
@@ -45,25 +47,21 @@ class AnnouncementController extends Controller
             'routePrefix' => 'bp',
             'customers' => Customer::query()->whereIn('managing_bp_id', $scopeIds)->orderBy('code')->get(),
             'businessPartners' => BusinessPartner::query()->whereIn('id', $scopeIds)->orderBy('code')->get(),
-            'allowAll' => false,
+            'allowBroadcast' => true,
         ]);
     }
 
     public function store(Request $request, AnnouncementService $service): RedirectResponse
     {
-        $validated = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'body' => ['required', 'string', 'max:10000'],
-            'target_type' => ['required', 'in:bp,customer'],
-            'target_id' => ['required', 'integer'],
-        ]);
+        $payload = $this->validatedAnnouncementPayload($request, allowBroadcast: true);
 
         try {
             $announcement = $service->publish(
                 $request->user('bp'),
-                $validated['title'],
-                $validated['body'],
-                [['type' => $validated['target_type'], 'id' => (int) $validated['target_id']]],
+                $payload['title'],
+                $payload['body'],
+                $payload['targets'],
+                $payload['options'],
             );
         } catch (InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['title' => $exception->getMessage()]);
@@ -71,7 +69,48 @@ class AnnouncementController extends Controller
 
         return redirect()
             ->route('bp.announcements.show', $announcement)
-            ->with('status', 'お知らせを公開しました。');
+            ->with('status', 'お知らせを保存しました。');
+    }
+
+    public function edit(Request $request, Announcement $announcement, RbacService $rbac): View
+    {
+        $actor = $request->user('bp');
+        abort_unless($rbac->hasPermission($actor, 'announcement.manage'), 403);
+        abort_unless($announcement->owning_bp_id === $actor->bp_id, 403);
+        $announcement->load('targets');
+
+        $hierarchy = app(BpHierarchyService::class);
+        $scopeIds = $hierarchy->descendantIdsIncludingSelf($actor->businessPartner);
+
+        return view('admin.announcements.edit', array_merge([
+            'routePrefix' => 'bp',
+            'announcement' => $announcement,
+            'customers' => Customer::query()->whereIn('managing_bp_id', $scopeIds)->orderBy('code')->get(),
+            'businessPartners' => BusinessPartner::query()->whereIn('id', $scopeIds)->orderBy('code')->get(),
+            'allowBroadcast' => true,
+        ], $this->announcementFormState($announcement)));
+    }
+
+    public function update(Request $request, Announcement $announcement, AnnouncementService $service): RedirectResponse
+    {
+        $payload = $this->validatedAnnouncementPayload($request, allowBroadcast: true);
+
+        try {
+            $service->update(
+                $request->user('bp'),
+                $announcement,
+                $payload['title'],
+                $payload['body'],
+                $payload['targets'],
+                $payload['options'],
+            );
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['title' => $exception->getMessage()]);
+        }
+
+        return redirect()
+            ->route('bp.announcements.show', $announcement)
+            ->with('status', 'お知らせを更新しました。');
     }
 
     public function show(Request $request, Announcement $announcement, AnnouncementService $service, RbacService $rbac): View
@@ -84,7 +123,9 @@ class AnnouncementController extends Controller
             abort(403);
         }
 
-        $service->markRead($actor, $announcement);
+        if ($service->isVisibleTo($actor, $announcement)) {
+            $service->markRead($actor, $announcement);
+        }
 
         return view('admin.announcements.show', [
             'announcement' => $announcement->load('targets'),

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Domains\Iam\Services\RbacService;
 use App\Domains\Support\Services\AnnouncementService;
 use App\Http\Controllers\Concerns\ConfirmsAnnouncementDeletion;
+use App\Http\Controllers\Concerns\HandlesAnnouncementForm;
 use App\Http\Controllers\Controller;
 use App\Models\Announcement;
 use App\Models\BusinessPartner;
@@ -18,6 +19,7 @@ use InvalidArgumentException;
 class AnnouncementController extends Controller
 {
     use ConfirmsAnnouncementDeletion;
+    use HandlesAnnouncementForm;
 
     public function index(Request $request, AnnouncementService $service, RbacService $rbac): View
     {
@@ -42,30 +44,21 @@ class AnnouncementController extends Controller
             'routePrefix' => 'admin',
             'customers' => Customer::query()->orderBy('code')->get(),
             'businessPartners' => BusinessPartner::query()->orderBy('code')->get(),
-            'allowAll' => true,
+            'allowBroadcast' => true,
         ]);
     }
 
     public function store(Request $request, AnnouncementService $service): RedirectResponse
     {
-        $validated = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'body' => ['required', 'string', 'max:10000'],
-            'target_type' => ['required', 'in:all,bp,customer'],
-            'target_id' => ['nullable', 'integer'],
-        ]);
-
-        $targets = [[
-            'type' => $validated['target_type'],
-            'id' => $validated['target_type'] === 'all' ? null : ($validated['target_id'] ?? null),
-        ]];
+        $payload = $this->validatedAnnouncementPayload($request, allowBroadcast: true);
 
         try {
             $announcement = $service->publish(
                 $request->user('admin'),
-                $validated['title'],
-                $validated['body'],
-                $targets,
+                $payload['title'],
+                $payload['body'],
+                $payload['targets'],
+                $payload['options'],
             );
         } catch (InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['title' => $exception->getMessage()]);
@@ -73,25 +66,62 @@ class AnnouncementController extends Controller
 
         return redirect()
             ->route('admin.announcements.show', $announcement)
-            ->with('status', 'お知らせを公開しました。');
+            ->with('status', 'お知らせを保存しました。');
+    }
+
+    public function edit(Request $request, Announcement $announcement, RbacService $rbac): View
+    {
+        abort_unless($rbac->hasPermission($request->user('admin'), 'announcement.manage'), 403);
+        $announcement->load('targets');
+
+        return view('admin.announcements.edit', array_merge([
+            'routePrefix' => 'admin',
+            'announcement' => $announcement,
+            'customers' => Customer::query()->orderBy('code')->get(),
+            'businessPartners' => BusinessPartner::query()->orderBy('code')->get(),
+            'allowBroadcast' => true,
+        ], $this->announcementFormState($announcement)));
+    }
+
+    public function update(Request $request, Announcement $announcement, AnnouncementService $service): RedirectResponse
+    {
+        $payload = $this->validatedAnnouncementPayload($request, allowBroadcast: true);
+
+        try {
+            $service->update(
+                $request->user('admin'),
+                $announcement,
+                $payload['title'],
+                $payload['body'],
+                $payload['targets'],
+                $payload['options'],
+            );
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['title' => $exception->getMessage()]);
+        }
+
+        return redirect()
+            ->route('admin.announcements.show', $announcement)
+            ->with('status', 'お知らせを更新しました。');
     }
 
     public function show(Request $request, Announcement $announcement, AnnouncementService $service, RbacService $rbac): View
     {
         $actor = $request->user('admin');
-        if ($rbac->hasPermission($actor, 'announcement.manage')) {
-            // ok
-        } elseif (! $service->isVisibleTo($actor, $announcement)) {
+        $canManage = $rbac->hasPermission($actor, 'announcement.manage');
+        if (! $canManage && ! $service->isVisibleTo($actor, $announcement)) {
             abort(403);
         }
 
-        $service->markRead($actor, $announcement);
+        if ($service->isVisibleTo($actor, $announcement)) {
+            $service->markRead($actor, $announcement);
+        }
 
         return view('admin.announcements.show', [
             'announcement' => $announcement->load('targets'),
             'routePrefix' => 'admin',
-            'canManage' => $rbac->hasPermission($actor, 'announcement.manage'),
-            'deleteConfirmationCode' => $rbac->hasPermission($actor, 'announcement.manage')
+            'canManage' => $canManage,
+            'deleteConfirmationCode' => $canManage
                 ? $this->issueAnnouncementDeleteConfirmationCode($announcement)
                 : null,
         ]);

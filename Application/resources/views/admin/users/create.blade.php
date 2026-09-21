@@ -6,21 +6,63 @@
 @endsection
 
 @section('content')
+    @php
+        $prefix = $routePrefix ?? 'admin';
+        $selectedCustomerId = (int) old('customer_id', $selectedCustomerId ?? 0) ?: null;
+        $returnCustomerId = $returnCustomerId ?? null;
+        $returnBpId = $returnBpId ?? null;
+        $lockUserType = $lockUserType ?? false;
+        $lockOrganization = $lockOrganization ?? false;
+        $typeSwitchUrl = route($prefix.'.users.create');
+        $typeSwitchQuery = [];
+        if ($returnCustomerId) {
+            $typeSwitchQuery['return_customer_id'] = $returnCustomerId;
+        }
+        if ($returnBpId) {
+            $typeSwitchQuery['return_bp_id'] = $returnBpId;
+        }
+        if ($selectedCustomerId) {
+            $typeSwitchQuery['customer_id'] = $selectedCustomerId;
+        }
+        $backUrl = $returnCustomerId
+            ? route($prefix.'.customers.show', ['customer' => $returnCustomerId, 'tab' => 'users'])
+            : ($returnBpId
+                ? route($prefix.'.business-partners.show', ['businessPartner' => $returnBpId, 'tab' => 'users'])
+                : route($prefix.'.users.index'));
+        $backLabel = $returnCustomerId ? 'カスタマー詳細へ' : ($returnBpId ? 'BP詳細へ' : '一覧へ');
+    @endphp
     <h1 class="h3 mb-3">ユーザー作成</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif
-    <form method="POST" action="{{ route(($routePrefix ?? 'admin').'.users.store') }}" class="card card-body" style="max-width:40rem">
+    <form method="POST" action="{{ route($prefix.'.users.store') }}" class="card card-body" style="max-width:40rem">
         @csrf
+        @if ($returnCustomerId)
+            <input type="hidden" name="return_customer_id" value="{{ $returnCustomerId }}">
+        @endif
+        @if ($returnBpId)
+            <input type="hidden" name="return_bp_id" value="{{ $returnBpId }}">
+        @endif
         <div class="mb-3">
             <label class="form-label" for="user_type">種別</label>
-            <select name="user_type" id="user_type" class="form-select" required onchange="location.href='{{ route(($routePrefix ?? 'admin').'.users.create') }}?type='+this.value">
-                @if (($routePrefix ?? 'admin') === 'admin')
+            @if ($lockUserType)
+                <input type="hidden" name="user_type" value="{{ $userType->value }}">
+                <input type="text" id="user_type" class="form-control" value="{{ $userType->value === 'bp' ? 'BP' : ($userType->value === 'customer' ? 'カスタマー' : '管理者') }}" disabled>
+            @else
+            <select
+                name="user_type"
+                id="user_type"
+                class="form-select"
+                required
+                onchange="location.href='{{ $typeSwitchUrl }}?type='+this.value+'{{ $typeSwitchQuery ? '&'.http_build_query($typeSwitchQuery) : '' }}'"
+            >
+                @if ($prefix === 'admin')
                     <option value="admin" @selected($userType->value === 'admin')>管理者</option>
                 @endif
                 <option value="bp" @selected($userType->value === 'bp')>BP</option>
                 <option value="customer" @selected($userType->value === 'customer')>カスタマー</option>
             </select>
+            @endif
         </div>
         <div class="mb-3">
             <label class="form-label" for="login_id">ログインID</label>
@@ -37,21 +79,27 @@
         @if ($userType->value === 'bp')
             <div class="mb-3">
                 <label class="form-label" for="bp_id">所属BP</label>
-                <select name="bp_id" id="bp_id" class="form-select" required>
+                <select name="bp_id" id="bp_id" class="form-select" required @disabled($lockOrganization)>
                     @foreach ($businessPartners as $partner)
-                        <option value="{{ $partner->id }}" @selected((int) old('bp_id') === $partner->id)>{{ $partner->code }} / {{ $partner->name }}</option>
+                        <option value="{{ $partner->id }}" @selected((int) old('bp_id', $businessPartners->count() === 1 ? $partner->id : 0) === $partner->id)>{{ $partner->code }} / {{ $partner->name }}</option>
                     @endforeach
                 </select>
+                @if ($lockOrganization && $businessPartners->count() === 1)
+                    <input type="hidden" name="bp_id" value="{{ $businessPartners->first()->id }}">
+                @endif
             </div>
         @endif
         @if ($userType->value === 'customer')
             <div class="mb-3">
                 <label class="form-label" for="customer_id">所属カスタマー</label>
-                <select name="customer_id" id="customer_id" class="form-select" required>
+                <select name="customer_id" id="customer_id" class="form-select" required @disabled($selectedCustomerId && $returnCustomerId)>
                     @foreach ($customers as $customer)
-                        <option value="{{ $customer->id }}" @selected((int) old('customer_id') === $customer->id)>{{ $customer->code }} / {{ $customer->name }}</option>
+                        <option value="{{ $customer->id }}" @selected($selectedCustomerId === $customer->id || (int) old('customer_id') === $customer->id)>{{ $customer->code }} / {{ $customer->name }}</option>
                     @endforeach
                 </select>
+                @if ($selectedCustomerId && $returnCustomerId)
+                    <input type="hidden" name="customer_id" value="{{ $selectedCustomerId }}">
+                @endif
             </div>
         @endif
         <div class="mb-3">
@@ -79,6 +127,6 @@
             <label class="form-check-label" for="is_active">有効</label>
         </div>
         <button class="btn btn-primary" type="submit">作成</button>
-        <a href="{{ route(($routePrefix ?? 'admin').'.users.index') }}" class="btn btn-link">一覧へ</a>
+        <a href="{{ $backUrl }}" class="btn btn-link">{{ $backLabel }}</a>
     </form>
 @endsection

@@ -59,6 +59,11 @@ class Customer extends Model
         return $this->hasMany(User::class, 'customer_id');
     }
 
+    public function contracts(): HasMany
+    {
+        return $this->hasMany(Contract::class);
+    }
+
     public function sites(): HasMany
     {
         return $this->hasMany(Site::class);

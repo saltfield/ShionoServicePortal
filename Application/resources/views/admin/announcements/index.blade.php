@@ -11,7 +11,7 @@
         <h1 class="h3 mb-0">お知らせ</h1>
         <div class="d-flex gap-2">
             @if ($canManage ?? false)
-                <a href="{{ route(($routePrefix ?? 'admin').'.announcements.create') }}" class="btn btn-primary btn-sm">新規公開</a>
+                <a href="{{ route(($routePrefix ?? 'admin').'.announcements.create') }}" class="btn btn-primary btn-sm">新規登録</a>
             @endif
             <a href="{{ route(($routePrefix ?? 'admin').'.dashboard') }}" class="btn btn-outline-secondary btn-sm">ダッシュボード</a>
         </div>
@@ -24,7 +24,8 @@
             <thead>
                 <tr>
                     <th>タイトル</th>
-                    <th>公開日時</th>
+                    <th>公開開始</th>
+                    <th>公開終了</th>
                     <th>配信先</th>
                 </tr>
             </thead>
@@ -41,6 +42,9 @@
                         </td>
                         <td class="small">{{ $announcement->published_at?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
                         <td class="small">
+                            {{ $announcement->expires_at ? $announcement->expires_at->timezone(config('app.timezone'))->format('Y-m-d H:i') : '無期限' }}
+                        </td>
+                        <td class="small">
                             @foreach ($announcement->targets as $target)
                                 {{ $target->target_type->label() }}@if ($target->target_id)#{{ $target->target_id }}@endif
                                 @if (! $loop->last)、@endif
@@ -48,7 +52,7 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="3" class="text-muted">お知らせはありません。</td></tr>
+                    <tr><td colspan="4" class="text-muted">お知らせはありません。</td></tr>
                 @endforelse
             </tbody>
         </table>

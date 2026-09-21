@@ -33,6 +33,7 @@ use App\Http\Controllers\Bp\DashboardController as BpDashboardController;
 use App\Http\Controllers\Bp\InquiryController as BpInquiryController;
 use App\Http\Controllers\Bp\InvoiceController as BpInvoiceController;
 use App\Http\Controllers\Bp\ItemController as BpItemController;
+use App\Http\Controllers\Bp\ItemDocumentController as BpItemDocumentController;
 use App\Http\Controllers\Bp\SiteController as BpSiteController;
 use App\Http\Controllers\Bp\UserController as BpUserController;
 use App\Http\Controllers\Bp\WholesalePriceController as BpWholesalePriceController;
@@ -44,6 +45,7 @@ use App\Http\Controllers\Customer\ContractController as CustomerContractControll
 use App\Http\Controllers\Customer\DashboardController as CustomerDashboardController;
 use App\Http\Controllers\Customer\InquiryController as CustomerInquiryController;
 use App\Http\Controllers\Customer\InvoiceController as CustomerInvoiceController;
+use App\Http\Controllers\Customer\UserController as CustomerUserController;
 use App\Http\Controllers\PostalLookupController;
 use Illuminate\Support\Facades\Route;
 
@@ -100,18 +102,29 @@ foreach (
                 if ($guard === 'customer') {
                     Route::get('contracts', [CustomerContractController::class, 'index'])->name('contracts.index');
                     Route::get('contracts/{contract}', [CustomerContractController::class, 'show'])->name('contracts.show');
+                    Route::post('contracts/{contract}/messages', [CustomerContractController::class, 'storeMessage'])->name('contracts.messages.store');
                     Route::get('contract-items/{contractItem}/documents/{document}/download', [CustomerContractController::class, 'downloadDocument'])->name('contracts.items.documents.download');
 
-                    Route::get('inquiries', [CustomerInquiryController::class, 'index'])->name('inquiries.index');
-                    Route::get('inquiries/create', [CustomerInquiryController::class, 'create'])->name('inquiries.create');
-                    Route::post('inquiries', [CustomerInquiryController::class, 'store'])->name('inquiries.store');
-                    Route::get('inquiries/{inquiry}', [CustomerInquiryController::class, 'show'])->name('inquiries.show');
+                    Route::get('tickets/received', [CustomerInquiryController::class, 'received'])->name('tickets.received');
+                    Route::get('tickets/issued', [CustomerInquiryController::class, 'issued'])->name('tickets.issued');
+                    Route::get('tickets/create', [CustomerInquiryController::class, 'create'])->name('tickets.create');
+                    Route::post('tickets', [CustomerInquiryController::class, 'store'])->name('tickets.store');
+                    Route::get('tickets/{inquiry}', [CustomerInquiryController::class, 'show'])->name('tickets.show');
+                    Route::post('tickets/{inquiry}/withdraw', [CustomerInquiryController::class, 'withdraw'])->name('tickets.withdraw');
+                    Route::get('tickets/{inquiry}/attachments/{attachment}', [CustomerInquiryController::class, 'downloadAttachment'])->name('tickets.attachments.download');
 
                     Route::get('invoices', [CustomerInvoiceController::class, 'index'])->name('invoices.index');
                     Route::get('invoices/{invoice}', [CustomerInvoiceController::class, 'show'])->name('invoices.show');
 
                     Route::get('announcements', [CustomerAnnouncementController::class, 'index'])->name('announcements.index');
                     Route::get('announcements/{announcement}', [CustomerAnnouncementController::class, 'show'])->name('announcements.show');
+
+                    Route::get('users', [CustomerUserController::class, 'index'])->name('users.index');
+                    Route::get('users/create', [CustomerUserController::class, 'create'])->name('users.create');
+                    Route::post('users', [CustomerUserController::class, 'store'])->name('users.store');
+                    Route::get('users/{user}/edit', [CustomerUserController::class, 'edit'])->name('users.edit');
+                    Route::put('users/{user}', [CustomerUserController::class, 'update'])->name('users.update');
+                    Route::delete('users/{user}', [CustomerUserController::class, 'destroy'])->name('users.destroy');
                 }
 
                 if ($guard === 'admin') {
@@ -177,9 +190,14 @@ foreach (
                     Route::put('contracts/{contract}/prices', [ContractController::class, 'updatePrices'])->name('contracts.prices');
                     Route::post('contracts/{contract}/submit-approval', [ContractController::class, 'submitApproval'])->name('contracts.submit-approval');
                     Route::post('contracts/{contract}/activate', [ContractController::class, 'activate'])->name('contracts.activate');
+                    Route::post('contracts/{contract}/revert-service', [ContractController::class, 'revertService'])->name('contracts.revert-service');
+                    Route::post('contracts/{contract}/cancel', [ContractController::class, 'cancel'])->name('contracts.cancel');
+                    Route::get('contracts/{contract}/cancellation-suggestion', [ContractController::class, 'cancellationSuggestion'])->name('contracts.cancellation-suggestion');
+                    Route::post('contracts/{contract}/messages', [ContractController::class, 'storeMessage'])->name('contracts.messages.store');
                     Route::post('contracts/{contract}/regenerate-documents', [ContractController::class, 'regenerateDocuments'])->name('contracts.regenerate-documents');
                     Route::put('contract-items/{contractItem}/data', [ContractController::class, 'upsertData'])->name('contracts.items.data');
                     Route::get('contract-items/{contractItem}/documents/{document}/download', [ContractController::class, 'downloadDocument'])->name('contracts.items.documents.download');
+                    Route::delete('contract-items/{contractItem}/documents/{document}', [ContractController::class, 'destroyDocument'])->name('contracts.items.documents.destroy');
 
                     Route::get('applications', [ApplicationController::class, 'index'])->name('applications.index');
                     Route::post('applications/{application}/decide', [ApplicationController::class, 'decide'])->name('applications.decide');
@@ -191,17 +209,20 @@ foreach (
                     Route::post('invoices/{invoice}/mark-paid', [InvoiceController::class, 'markPaid'])->name('invoices.mark-paid');
                     Route::post('invoices/{invoice}/cancel', [InvoiceController::class, 'cancel'])->name('invoices.cancel');
 
-                    Route::get('inquiries', [InquiryController::class, 'index'])->name('inquiries.index');
-                    Route::get('inquiries/create', [InquiryController::class, 'create'])->name('inquiries.create');
-                    Route::post('inquiries', [InquiryController::class, 'store'])->name('inquiries.store');
-                    Route::get('inquiries/{inquiry}', [InquiryController::class, 'show'])->name('inquiries.show');
-                    Route::post('inquiries/{inquiry}/close', [InquiryController::class, 'close'])->name('inquiries.close');
-                    Route::post('inquiries/{inquiry}/reopen', [InquiryController::class, 'reopen'])->name('inquiries.reopen');
-                    Route::delete('inquiries/{inquiry}', [InquiryController::class, 'destroy'])->name('inquiries.destroy');
+                    Route::get('tickets/received', [InquiryController::class, 'received'])->name('tickets.received');
+                    Route::get('tickets/{inquiry}/inspect', [InquiryController::class, 'inspect'])->name('tickets.inspect');
+                    Route::get('tickets/{inquiry}', [InquiryController::class, 'show'])->name('tickets.show');
+                    Route::post('tickets/{inquiry}/start-progress', [InquiryController::class, 'startProgress'])->name('tickets.start-progress');
+                    Route::post('tickets/{inquiry}/close', [InquiryController::class, 'close'])->name('tickets.close');
+                    Route::post('tickets/{inquiry}/reopen', [InquiryController::class, 'reopen'])->name('tickets.reopen');
+                    Route::delete('tickets/{inquiry}', [InquiryController::class, 'destroy'])->name('tickets.destroy');
+                    Route::get('tickets/{inquiry}/attachments/{attachment}', [InquiryController::class, 'downloadAttachment'])->name('tickets.attachments.download');
 
                     Route::get('announcements', [AnnouncementController::class, 'index'])->name('announcements.index');
                     Route::get('announcements/create', [AnnouncementController::class, 'create'])->name('announcements.create');
                     Route::post('announcements', [AnnouncementController::class, 'store'])->name('announcements.store');
+                    Route::get('announcements/{announcement}/edit', [AnnouncementController::class, 'edit'])->name('announcements.edit');
+                    Route::put('announcements/{announcement}', [AnnouncementController::class, 'update'])->name('announcements.update');
                     Route::get('announcements/{announcement}', [AnnouncementController::class, 'show'])->name('announcements.show');
                     Route::delete('announcements/{announcement}', [AnnouncementController::class, 'destroy'])->name('announcements.destroy');
 
@@ -245,6 +266,16 @@ foreach (
                     Route::delete('sites/{site}', [BpSiteController::class, 'destroy'])->name('sites.destroy');
 
                     Route::get('items', [BpItemController::class, 'index'])->name('items.index');
+                    Route::get('items/create', [BpItemController::class, 'create'])->name('items.create');
+                    Route::post('items', [BpItemController::class, 'store'])->name('items.store');
+                    Route::get('items/{item}', [BpItemController::class, 'show'])->name('items.show');
+                    Route::get('items/{item}/edit', [BpItemController::class, 'edit'])->name('items.edit');
+                    Route::put('items/{item}', [BpItemController::class, 'update'])->name('items.update');
+                    Route::delete('items/{item}', [BpItemController::class, 'destroy'])->name('items.destroy');
+                    Route::post('items/{item}/wholesale', [BpItemController::class, 'storeWholesale'])->name('items.wholesale.store');
+                    Route::post('items/{item}/documents', [BpItemDocumentController::class, 'store'])->name('items.documents.store');
+                    Route::delete('item-documents/{itemDocument}', [BpItemDocumentController::class, 'destroy'])->name('items.documents.destroy');
+                    Route::get('item-documents/{itemDocument}/download', [BpItemDocumentController::class, 'download'])->name('items.documents.download');
                     Route::get('prices/wholesale', [BpWholesalePriceController::class, 'index'])->name('prices.wholesale.index');
                     Route::post('prices/wholesale', [BpWholesalePriceController::class, 'store'])->name('prices.wholesale.store');
                     Route::get('customers/{customer}/prices', [BpCustomerPriceController::class, 'edit'])->name('customers.prices.edit');
@@ -259,9 +290,14 @@ foreach (
                     Route::post('contracts/{contract}/submit-approval', [BpContractController::class, 'submitApproval'])->name('contracts.submit-approval');
                     Route::post('contracts/{contract}/price-change', [BpContractController::class, 'submitPriceChange'])->name('contracts.price-change');
                     Route::post('contracts/{contract}/activate', [BpContractController::class, 'activate'])->name('contracts.activate');
+                    Route::post('contracts/{contract}/revert-service', [BpContractController::class, 'revertService'])->name('contracts.revert-service');
+                    Route::post('contracts/{contract}/cancel', [BpContractController::class, 'cancel'])->name('contracts.cancel');
+                    Route::get('contracts/{contract}/cancellation-suggestion', [BpContractController::class, 'cancellationSuggestion'])->name('contracts.cancellation-suggestion');
+                    Route::post('contracts/{contract}/messages', [BpContractController::class, 'storeMessage'])->name('contracts.messages.store');
                     Route::post('contracts/{contract}/regenerate-documents', [BpContractController::class, 'regenerateDocuments'])->name('contracts.regenerate-documents');
                     Route::put('contract-items/{contractItem}/data', [BpContractController::class, 'upsertData'])->name('contracts.items.data');
                     Route::get('contract-items/{contractItem}/documents/{document}/download', [BpContractController::class, 'downloadDocument'])->name('contracts.items.documents.download');
+                    Route::delete('contract-items/{contractItem}/documents/{document}', [BpContractController::class, 'destroyDocument'])->name('contracts.items.documents.destroy');
 
                     Route::get('applications', [BpApplicationController::class, 'index'])->name('applications.index');
                     Route::post('applications/{application}/decide', [BpApplicationController::class, 'decide'])->name('applications.decide');
@@ -273,17 +309,23 @@ foreach (
                     Route::post('invoices/{invoice}/mark-paid', [BpInvoiceController::class, 'markPaid'])->name('invoices.mark-paid');
                     Route::post('invoices/{invoice}/cancel', [BpInvoiceController::class, 'cancel'])->name('invoices.cancel');
 
-                    Route::get('inquiries', [BpInquiryController::class, 'index'])->name('inquiries.index');
-                    Route::get('inquiries/create', [BpInquiryController::class, 'create'])->name('inquiries.create');
-                    Route::post('inquiries', [BpInquiryController::class, 'store'])->name('inquiries.store');
-                    Route::get('inquiries/{inquiry}', [BpInquiryController::class, 'show'])->name('inquiries.show');
-                    Route::post('inquiries/{inquiry}/close', [BpInquiryController::class, 'close'])->name('inquiries.close');
-                    Route::post('inquiries/{inquiry}/reopen', [BpInquiryController::class, 'reopen'])->name('inquiries.reopen');
-                    Route::delete('inquiries/{inquiry}', [BpInquiryController::class, 'destroy'])->name('inquiries.destroy');
+                    Route::get('tickets/received', [BpInquiryController::class, 'received'])->name('tickets.received');
+                    Route::get('tickets/issued', [BpInquiryController::class, 'issued'])->name('tickets.issued');
+                    Route::get('tickets/create', [BpInquiryController::class, 'create'])->name('tickets.create');
+                    Route::post('tickets', [BpInquiryController::class, 'store'])->name('tickets.store');
+                    Route::get('tickets/{inquiry}', [BpInquiryController::class, 'show'])->name('tickets.show');
+                    Route::post('tickets/{inquiry}/withdraw', [BpInquiryController::class, 'withdraw'])->name('tickets.withdraw');
+                    Route::post('tickets/{inquiry}/start-progress', [BpInquiryController::class, 'startProgress'])->name('tickets.start-progress');
+                    Route::post('tickets/{inquiry}/close', [BpInquiryController::class, 'close'])->name('tickets.close');
+                    Route::post('tickets/{inquiry}/reopen', [BpInquiryController::class, 'reopen'])->name('tickets.reopen');
+                    Route::delete('tickets/{inquiry}', [BpInquiryController::class, 'destroy'])->name('tickets.destroy');
+                    Route::get('tickets/{inquiry}/attachments/{attachment}', [BpInquiryController::class, 'downloadAttachment'])->name('tickets.attachments.download');
 
                     Route::get('announcements', [BpAnnouncementController::class, 'index'])->name('announcements.index');
                     Route::get('announcements/create', [BpAnnouncementController::class, 'create'])->name('announcements.create');
                     Route::post('announcements', [BpAnnouncementController::class, 'store'])->name('announcements.store');
+                    Route::get('announcements/{announcement}/edit', [BpAnnouncementController::class, 'edit'])->name('announcements.edit');
+                    Route::put('announcements/{announcement}', [BpAnnouncementController::class, 'update'])->name('announcements.update');
                     Route::get('announcements/{announcement}', [BpAnnouncementController::class, 'show'])->name('announcements.show');
                     Route::delete('announcements/{announcement}', [BpAnnouncementController::class, 'destroy'])->name('announcements.destroy');
                 }

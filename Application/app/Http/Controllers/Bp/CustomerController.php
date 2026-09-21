@@ -8,6 +8,7 @@ use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Bp\Services\OrganizationMasterService;
 use App\Domains\Iam\Services\AuthorizationService;
+use App\Domains\Iam\Services\RbacService;
 use App\Http\Controllers\Concerns\ConfirmsCustomerDeletion;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
@@ -32,15 +33,18 @@ class CustomerController extends Controller
         abort_unless($actorBp, 403);
 
         $scopeIds = $hierarchy->descendantIdsIncludingSelf($actorBp);
-        $managingBpId = $request->filled('managing_bp_id') ? (int) $request->input('managing_bp_id') : $actorBp->id;
-        abort_unless(in_array($managingBpId, $scopeIds, true), 403);
+        $managingBpId = $request->filled('managing_bp_id') ? (int) $request->input('managing_bp_id') : null;
+        if ($managingBpId !== null) {
+            abort_unless(in_array($managingBpId, $scopeIds, true), 403);
+        }
 
         $cn = trim((string) $request->input('cn', ''));
         $cnName = trim((string) $request->input('cn_name', ''));
 
         $customers = Customer::query()
             ->with('managingBp')
-            ->where('managing_bp_id', $managingBpId)
+            ->whereIn('managing_bp_id', $scopeIds)
+            ->when($managingBpId !== null, fn ($query) => $query->where('managing_bp_id', $managingBpId))
             ->when($cn !== '', function ($query) use ($cn) {
                 $normalized = IdentifierNormalizer::normalize($cn);
                 $query->where('code', 'like', "%{$normalized}%");
@@ -87,21 +91,37 @@ class CustomerController extends Controller
         $customer = $service->createCustomer($request->user('bp'), $managingBp, $validated);
 
         return redirect()
-            ->route('bp.customers.show', $customer)
+            ->route('bp.customers.show', ['customer' => $customer, 'tab' => 'overview'])
             ->with('status', "{$customer->code} を作成しました。");
     }
 
-    public function show(Request $request, Customer $customer, OrganizationMasterService $service, AuthorizationService $authorization): View
+    public function show(Request $request, Customer $customer, OrganizationMasterService $service, AuthorizationService $authorization, RbacService $rbac): View
     {
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'customer.view');
         $service->ensureCustomerInScope($actor, $customer);
         $customer->load(['managingBp', 'sites']);
 
+        $canManageUsers = $rbac->hasPermission($actor, 'iam.user.manage');
+        $canViewContracts = $rbac->hasPermission($actor, 'contract.view');
+        $canCreateContracts = $rbac->hasPermission($actor, 'contract.create');
+        $customerUsers = $canManageUsers
+            ? $customer->users()->with('roles')->orderBy('login_id')->get()
+            : collect();
+        $customerContracts = $canViewContracts
+            ? $customer->contracts()->with(['site', 'owningBp'])->latest()->get()
+            : collect();
+
         return view('admin.customers.show', [
             'customer' => $customer,
             'routePrefix' => 'bp',
             'deleteConfirmationCode' => $this->issueCustomerDeleteConfirmationCode($customer),
+            'canManageUsers' => $canManageUsers,
+            'canViewContracts' => $canViewContracts,
+            'canCreateContracts' => $canCreateContracts,
+            'customerUsers' => $customerUsers,
+            'customerContracts' => $customerContracts,
+            'activeTab' => $this->resolveCustomerShowTab($request, $canManageUsers, $canViewContracts),
         ]);
     }
 
@@ -125,7 +145,7 @@ class CustomerController extends Controller
         $service->updateCustomer($request->user('bp'), $customer, $validated);
 
         return redirect()
-            ->route('bp.customers.show', $customer)
+            ->route('bp.customers.show', ['customer' => $customer, 'tab' => 'overview'])
             ->with('status', 'カスタマー情報を更新しました。');
     }
 
@@ -142,6 +162,20 @@ class CustomerController extends Controller
         return redirect()
             ->route('bp.customers.index', ['managing_bp_id' => $customer->managing_bp_id])
             ->with('status', 'カスタマーを削除しました。');
+    }
+
+    private function resolveCustomerShowTab(Request $request, bool $canManageUsers, bool $canViewContracts): string
+    {
+        $tab = (string) $request->input('tab', 'overview');
+        $allowed = ['overview', 'sites', 'prices'];
+        if ($canManageUsers) {
+            $allowed[] = 'users';
+        }
+        if ($canViewContracts) {
+            $allowed[] = 'contracts';
+        }
+
+        return in_array($tab, $allowed, true) ? $tab : 'overview';
     }
 
     private function validatedCustomer(Request $request, bool $requireManagingBp = true): array

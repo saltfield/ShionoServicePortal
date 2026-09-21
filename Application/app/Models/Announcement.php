@@ -15,6 +15,8 @@ class Announcement extends Model
         'title',
         'body',
         'published_at',
+        'expires_at',
+        'include_new_registrations',
         'created_by_user_id',
         'owning_bp_id',
     ];
@@ -23,6 +25,8 @@ class Announcement extends Model
     {
         return [
             'published_at' => 'datetime',
+            'expires_at' => 'datetime',
+            'include_new_registrations' => 'boolean',
         ];
     }
 
@@ -44,5 +48,20 @@ class Announcement extends Model
     public function reads(): HasMany
     {
         return $this->hasMany(AnnouncementRead::class);
+    }
+
+    public function isCurrentlyPublished(?\DateTimeInterface $at = null): bool
+    {
+        $at = $at ? \Illuminate\Support\Carbon::instance(\Illuminate\Support\Carbon::parse($at)) : now();
+
+        if ($this->published_at === null || $this->published_at->gt($at)) {
+            return false;
+        }
+
+        if ($this->expires_at !== null && $this->expires_at->lte($at)) {
+            return false;
+        }
+
+        return true;
     }
 }

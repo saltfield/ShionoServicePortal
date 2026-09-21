@@ -44,14 +44,18 @@ class ItemDocumentController extends Controller
         return back()->with('status', 'Documentテンプレートを追加しました。');
     }
 
-    public function destroy(Request $request, ItemDocument $itemDocument, AuthorizationService $authorization): RedirectResponse
+    public function destroy(Request $request, ItemDocument $itemDocument, ContractService $service, AuthorizationService $authorization): RedirectResponse
     {
         $authorization->authorize($request->user('admin'), 'item.manage');
         $this->assertItemDocumentDeleteConfirmation($request, $itemDocument);
-        Storage::disk('local')->delete($itemDocument->file_path);
-        $itemDocument->delete();
 
-        return back()->with('status', 'Documentテンプレートを削除しました。');
+        try {
+            $service->deleteItemDocument($request->user('admin'), $itemDocument);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['confirmation_code' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', 'Documentテンプレートを削除しました。発行済みPDFは契約側に残ります。');
     }
 
     public function download(Request $request, ItemDocument $itemDocument, AuthorizationService $authorization): StreamedResponse

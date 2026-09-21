@@ -18,12 +18,23 @@
     @if (session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>
     @endif
+    @if ($errors->any())
+        <div class="alert alert-danger">{{ $errors->first() }}</div>
+    @endif
 
     <form method="GET" class="row g-2 align-items-end mb-3">
-        <div class="col-md-4">
-            <label class="form-label small mb-1" for="managing_bp_id">管理BP <span class="text-danger">*</span></label>
-            <select id="managing_bp_id" name="managing_bp_id" class="form-select form-select-sm" required>
-                <option value="">選択してください</option>
+        <div class="col-md-3">
+            <label class="form-label small mb-1" for="cn">CN</label>
+            <input type="text" id="cn" name="cn" value="{{ $filters['cn'] }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-1" for="cn_name">カスタマー名</label>
+            <input type="text" id="cn_name" name="cn_name" value="{{ $filters['cn_name'] }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small mb-1" for="managing_bp_id">管理BP</label>
+            <select id="managing_bp_id" name="managing_bp_id" class="form-select form-select-sm">
+                <option value="">すべて</option>
                 @foreach ($managingPartners as $partner)
                     <option value="{{ $partner->id }}" @selected((int) $filters['managing_bp_id'] === $partner->id)>
                         {{ $partner->code }} / {{ $partner->name }}
@@ -31,51 +42,40 @@
                 @endforeach
             </select>
         </div>
-        <div class="col-md-2">
-            <label class="form-label small mb-1" for="cn">CN</label>
-            <input type="text" id="cn" name="cn" value="{{ $filters['cn'] }}" class="form-control form-control-sm" @disabled(! $filters['managing_bp_id'])>
-        </div>
-        <div class="col-md-3">
-            <label class="form-label small mb-1" for="cn_name">カスタマー名</label>
-            <input type="text" id="cn_name" name="cn_name" value="{{ $filters['cn_name'] }}" class="form-control form-control-sm" @disabled(! $filters['managing_bp_id'])>
-        </div>
         <div class="col-auto">
-            <button class="btn btn-primary btn-sm" type="submit">表示</button>
+            <button class="btn btn-primary btn-sm" type="submit">検索</button>
             <a href="{{ route(($routePrefix ?? 'admin').'.customers.index') }}" class="btn btn-outline-secondary btn-sm">クリア</a>
         </div>
     </form>
 
-    @unless ($filters['managing_bp_id'])
-        <p class="text-muted small">管理BPを選択すると一覧が表示されます。</p>
-    @else
-        <div class="table-responsive">
-            <table class="table table-sm table-striped align-middle">
-                <thead>
+    <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+            <thead>
+            <tr>
+                <th>CN</th>
+                <th>名称</th>
+                <th>管理BP</th>
+                <th>2FA</th>
+                <th>状態</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            @forelse ($customers as $customer)
                 <tr>
-                    <th>CN</th>
-                    <th>カスタマー名</th>
-                    <th>管理BP</th>
-                    <th>2FA</th>
-                    <th>状態</th>
-                    <th></th>
+                    <td><code>{{ $customer->code }}</code></td>
+                    <td>{{ $customer->name }}</td>
+                    <td>{{ $customer->managingBp?->code ?? '-' }}</td>
+                    <td>{{ $customer->two_factor_mode?->label() ?? '—' }}</td>
+                    <td>{{ $customer->is_active ? '有効' : '無効' }}</td>
+                    <td><a href="{{ route(($routePrefix ?? 'admin').'.customers.show', $customer) }}" class="btn btn-outline-secondary btn-sm">詳細</a></td>
                 </tr>
-                </thead>
-                <tbody>
-                @forelse ($customers as $customer)
-                    <tr>
-                        <td><code>{{ $customer->code }}</code></td>
-                        <td>{{ $customer->name }}</td>
-                        <td>{{ $customer->managingBp?->name }}</td>
-                        <td>{{ $customer->two_factor_mode?->value }}</td>
-                        <td>{{ $customer->is_active ? '有効' : '無効' }}</td>
-                        <td><a href="{{ route(($routePrefix ?? 'admin').'.customers.show', $customer) }}" class="btn btn-outline-secondary btn-sm">詳細</a></td>
-                    </tr>
-                @empty
-                    <tr><td colspan="6" class="text-center text-muted py-4">該当なし</td></tr>
-                @endforelse
-                </tbody>
-            </table>
-        </div>
-        {{ $customers->links() }}
-    @endunless
+            @empty
+                <tr><td colspan="6" class="text-center text-muted py-4">カスタマーがありません。</td></tr>
+            @endforelse
+            </tbody>
+        </table>
+    </div>
+
+    {{ $customers->links() }}
 @endsection

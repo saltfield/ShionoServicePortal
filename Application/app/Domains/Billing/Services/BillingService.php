@@ -58,7 +58,7 @@ class BillingService
         $this->assertCanManageContract($actor, $contract);
 
         if ($contract->status !== ContractStatus::Activated) {
-            throw new InvalidArgumentException('開通済の契約のみ請求を発行できます。');
+            throw new InvalidArgumentException('サービス提供開始の契約のみ請求を発行できます。');
         }
 
         if (! preg_match('/^\d{6}$/', $billingYearMonth)) {
@@ -75,7 +75,8 @@ class BillingService
             throw new InvalidArgumentException('この契約・請求月の請求は既に発行されています。');
         }
 
-        $activatedYm = optional($contract->activated_at)->timezone(config('app.timezone'))->format('Ym');
+        $activatedYm = $contract->first_billing_year_month
+            ?: optional($contract->activated_at)->timezone(config('app.timezone'))->format('Ym');
         $lines = [];
         $sort = 0;
 

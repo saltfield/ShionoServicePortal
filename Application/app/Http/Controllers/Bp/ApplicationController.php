@@ -50,6 +50,8 @@ class ApplicationController extends Controller
             throw ValidationException::withMessages(['application' => $exception->getMessage()]);
         }
 
-        return back()->with('status', '申請を処理しました。');
+        return redirect()
+            ->route('bp.contracts.show', ['contract' => $application->contract_id, 'tab' => 'items'])
+            ->with('status', '申請を処理しました。');
     }
 }

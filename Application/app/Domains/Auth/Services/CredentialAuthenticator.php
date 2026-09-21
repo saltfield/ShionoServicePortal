@@ -24,14 +24,34 @@ class CredentialAuthenticator
         $loginId = IdentifierNormalizer::normalize($credentials['login_id'] ?? '');
 
         /** @var User|null $user */
-        $user = User::query()
-            ->with(['businessPartner', 'customer.managingBp'])
-            ->where('login_id', $loginId)
-            ->first();
+        $user = match ($expectedType) {
+            UserType::Admin => User::query()
+                ->where('user_type', UserType::Admin)
+                ->where('login_id', $loginId)
+                ->first(),
+            UserType::Bp => User::query()
+                ->with(['businessPartner', 'customer.managingBp'])
+                ->where('user_type', UserType::Bp)
+                ->where('login_id', $loginId)
+                ->whereHas('businessPartner', function ($query) use ($credentials) {
+                    $query->where('code', IdentifierNormalizer::normalize($credentials['bpn'] ?? ''));
+                })
+                ->first(),
+            UserType::Customer => User::query()
+                ->with(['businessPartner', 'customer.managingBp'])
+                ->where('user_type', UserType::Customer)
+                ->where('login_id', $loginId)
+                ->whereHas('customer', function ($query) use ($credentials) {
+                    $query->where('code', IdentifierNormalizer::normalize($credentials['cn'] ?? ''));
+                })
+                ->first(),
+        };
 
-        if ($user === null || $user->user_type !== $expectedType) {
+        if ($user === null) {
             $this->failLogin($expectedType, $loginId, 'invalid_credentials');
         }
+
+        $user->loadMissing(['businessPartner', 'customer.managingBp']);
 
         if (! $user->is_active) {
             $this->failLogin($expectedType, $loginId, 'inactive', $user);
@@ -39,20 +59,6 @@ class CredentialAuthenticator
 
         if (! Hash::check($credentials['password'] ?? '', $user->password)) {
             $this->failLogin($expectedType, $loginId, 'invalid_password', $user);
-        }
-
-        if ($expectedType === UserType::Bp) {
-            $bpn = IdentifierNormalizer::normalize($credentials['bpn'] ?? '');
-            if ($user->businessPartner === null || $user->businessPartner->code !== $bpn) {
-                $this->failLogin($expectedType, $loginId, 'bpn_mismatch', $user);
-            }
-        }
-
-        if ($expectedType === UserType::Customer) {
-            $cn = IdentifierNormalizer::normalize($credentials['cn'] ?? '');
-            if ($user->customer === null || $user->customer->code !== $cn) {
-                $this->failLogin($expectedType, $loginId, 'cn_mismatch', $user);
-            }
         }
 
         return $user;
