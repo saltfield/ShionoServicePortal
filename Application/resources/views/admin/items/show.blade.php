@@ -16,13 +16,16 @@
             ? ($ownDocumentCount ?? 0)
             : $item->documents->count();
     @endphp
+    @include('partials.breadcrumb', [
+        'crumbs' => [['label' => '品目', 'url' => route($prefix.'.items.index')]],
+        'current' => '品目詳細',
+    ])
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h3 mb-0">品目詳細</h1>
         <div class="d-flex gap-2">
             @if ($manageItem)
                 <a href="{{ route($prefix.'.items.edit', $item) }}" class="btn btn-primary btn-sm">編集</a>
             @endif
-            <a href="{{ route($prefix.'.items.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
         </div>
     </div>
 
@@ -42,6 +45,17 @@
         @endif
         <dt class="col-sm-3">説明</dt><dd class="col-sm-9">{{ $item->description ?: '—' }}</dd>
         <dt class="col-sm-3">課金区分</dt><dd class="col-sm-9">{{ $item->billing_type->label() }}</dd>
+        <dt class="col-sm-3">品目種別</dt>
+        <dd class="col-sm-9">
+            @if ($item->itemType)
+                {{ $item->itemType->name }}
+                @if ($item->itemType->hasGuideMessage())
+                    <div class="small text-muted mt-1" style="white-space:pre-wrap">{{ $item->itemType->message }}</div>
+                @endif
+            @else
+                <span class="text-muted">未設定</span>
+            @endif
+        </dd>
         <dt class="col-sm-3">必須セット</dt>
         <dd class="col-sm-9">
             @if ($item->requiredItem)

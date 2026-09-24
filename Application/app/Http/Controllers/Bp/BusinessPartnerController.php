@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Bp;
 
 use App\Domains\Auth\Enums\TwoFactorMode;
 use App\Domains\Auth\Services\BpHierarchyService;
+use App\Domains\Billing\Services\BpCustomerBillingOverviewService;
 use App\Domains\Bp\Services\OrganizationMasterService;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\RbacService;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Concerns\ConfirmsBusinessPartnerDeletion;
 use App\Http\Controllers\Concerns\ConfirmsBusinessPartnerMove;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
+use App\Models\Contract;
 use App\Models\Customer;
 use App\Models\User;
 use App\Support\ContactFieldRules;
@@ -110,7 +112,7 @@ class BusinessPartnerController extends Controller
             ->with('status', "{$partner->code} を作成しました。");
     }
 
-    public function show(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization, BpHierarchyService $hierarchy, RbacService $rbac): View
+    public function show(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization, BpHierarchyService $hierarchy, RbacService $rbac, BpCustomerBillingOverviewService $billingOverview): View
     {
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'bp.view');
@@ -122,11 +124,28 @@ class BusinessPartnerController extends Controller
         $canManageUsers = $rbac->hasPermission($actor, 'iam.user.manage');
         $canViewCustomers = $rbac->hasPermission($actor, 'customer.view');
         $canManageCustomers = $rbac->hasPermission($actor, 'customer.manage');
+        $canViewBilling = $rbac->hasPermission($actor, 'invoice.view');
+        $canViewContracts = $rbac->hasPermission($actor, 'contract.view');
         $activeTab = match ($request->input('tab')) {
             'users' => $canManageUsers ? 'users' : 'overview',
             'customers' => $canViewCustomers ? 'customers' : 'overview',
+            'contracts' => $canViewContracts ? 'contracts' : 'overview',
+            'billing' => $canViewBilling ? 'billing' : 'overview',
             default => 'overview',
         };
+
+        $billing = null;
+        if ($activeTab === 'billing' && $canViewBilling) {
+            $billing = $billingOverview->forPartner($businessPartner);
+        }
+
+        $bpContracts = $canViewContracts
+            ? Contract::query()
+                ->with(['customer', 'site'])
+                ->where('owning_bp_id', $businessPartner->id)
+                ->latest('id')
+                ->get()
+            : collect();
 
         return view('admin.business-partners.show', [
             'partner' => $businessPartner,
@@ -144,12 +163,16 @@ class BusinessPartnerController extends Controller
             'canManageUsers' => $canManageUsers,
             'canViewCustomers' => $canViewCustomers,
             'canManageCustomers' => $canManageCustomers,
+            'canViewBilling' => $canViewBilling,
+            'canViewContracts' => $canViewContracts,
             'bpUsers' => $canManageUsers
                 ? User::query()->with('roles')->where('bp_id', $businessPartner->id)->orderBy('login_id')->get()
                 : collect(),
             'bpCustomers' => $canViewCustomers
                 ? Customer::query()->where('managing_bp_id', $businessPartner->id)->orderBy('code')->get()
                 : collect(),
+            'bpContracts' => $bpContracts,
+            'billing' => $billing,
             'activeTab' => $activeTab,
         ]);
     }

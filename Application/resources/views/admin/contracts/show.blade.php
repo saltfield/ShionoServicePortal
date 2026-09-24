@@ -16,19 +16,24 @@
         $tabLabels = [
             'overview' => '概要',
             'items' => '明細・価格',
+            'billing' => '請求設定',
             'data' => 'データ',
             'messages' => 'メッセージ',
             'history' => '履歴',
         ];
         if ($isCustomer) {
-            $indexRoute = route('customer.contracts.index');
-            $indexLabel = '一覧へ';
+            unset($tabLabels['billing']);
+            $crumbs = [
+                ['label' => '契約一覧', 'url' => route('customer.contracts.index')],
+            ];
         } elseif ($returnCustomerId) {
-            $indexRoute = route($prefix.'.customers.show', ['customer' => $returnCustomerId, 'tab' => 'contracts']);
-            $indexLabel = 'カスタマー詳細へ';
+            $crumbs = [
+                ['label' => 'カスタマー詳細', 'url' => route($prefix.'.customers.show', ['customer' => $returnCustomerId, 'tab' => 'contracts'])],
+            ];
         } else {
-            $indexRoute = route($prefix.'.contracts.index');
-            $indexLabel = '一覧へ';
+            $crumbs = [
+                ['label' => '契約一覧', 'url' => route($prefix.'.contracts.index')],
+            ];
         }
         $showQuery = array_filter([
             'return_customer_id' => $returnCustomerId,
@@ -36,16 +41,45 @@
         $status = $contract->status->value;
         $documentDeleteCodes = $documentDeleteCodes ?? [];
         $documentFileMissing = $documentFileMissing ?? [];
+        $isSpecialPrice = (bool) $contract->special_price_requested;
+        $actorBpId = $prefix === 'bp' ? (int) (auth('bp')->user()?->bp_id ?? 0) : null;
+        $pendingApplicationsForDecide = collect();
+        if (! $isCustomer) {
+            $pendingApplicationsForDecide = ($contract->applications ?? collect())
+                ->filter(function ($application) use ($prefix, $actorBpId) {
+                    if ($application->status->value !== 'pending') {
+                        return false;
+                    }
+                    if ($prefix === 'admin') {
+                        return true;
+                    }
+
+                    return $prefix === 'bp' && $actorBpId === (int) $application->to_bp_id;
+                })
+                ->values();
+        }
+        $needsMyApproval = $pendingApplicationsForDecide->isNotEmpty();
+        $pendingPriceApproval = ($contract->applications ?? collect())
+            ->filter(fn ($application) => $application->type->value === 'price_approval' && $application->status->value === 'pending')
+            ->sortByDesc('id')
+            ->first();
+        $approvalProgressLabel = $pendingPriceApproval?->approvalProgressLabel();
     @endphp
 
+    @include('partials.breadcrumb', ['crumbs' => $crumbs, 'current' => '契約詳細'])
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <h1 class="h3 mb-0">契約詳細</h1>
             <p class="text-muted small mb-0 mt-1">
                 <code>{{ $contract->code }}</code> / {{ $contract->status->label() }}
+                @if ($approvalProgressLabel)
+                    <span class="badge text-bg-secondary ms-1">承認 {{ $approvalProgressLabel }}</span>
+                @endif
+                @if ($isSpecialPrice && ! $isCustomer)
+                    <span class="badge text-bg-danger ms-1">特価申請あり</span>
+                @endif
             </p>
         </div>
-        <a href="{{ $indexRoute }}" class="btn btn-outline-secondary btn-sm">{{ $indexLabel }}</a>
     </div>
 
     @if (session('status'))
@@ -67,9 +101,43 @@
     </ul>
 
     @if ($activeTab === 'overview')
+        @if ($status === 'draft')
+            <div class="alert alert-warning" role="alert">
+                <strong>このオーダーはまだ申請されていません。</strong>
+                明細・価格を確認のうえ、「明細・価格」タブから親BPへ価格承認申請を行ってください。
+            </div>
+        @endif
+        @if ($needsMyApproval)
+            <div class="alert alert-warning" role="alert">
+                <strong>この契約にはあなたの承認が必要な申請があります。</strong>
+                「明細・価格」タブから内容を確認し、承認または却下してください。
+                @if ($approvalProgressLabel)
+                    <span class="badge text-bg-secondary ms-1">承認 {{ $approvalProgressLabel }}</span>
+                @endif
+                @if ($isSpecialPrice)
+                    <span class="badge text-bg-danger ms-1">特価申請あり</span>
+                @endif
+            </div>
+        @elseif ($status === 'pending_price_approval' && $approvalProgressLabel && ! $isCustomer)
+            <div class="alert alert-info" role="alert">
+                価格承認の途上です。進捗: <span class="badge text-bg-secondary">{{ $approvalProgressLabel }}</span>
+                （ルートBPまでの承認が必要です）
+            </div>
+        @elseif ($isSpecialPrice && ! $isCustomer)
+            <div class="alert alert-info d-flex flex-wrap align-items-center gap-2" role="alert">
+                <span class="badge text-bg-danger">特価申請あり</span>
+                <span>この契約は特価申請付きです。詳細は「明細・価格」タブで確認できます。</span>
+            </div>
+        @endif
         <dl class="row mb-0">
             <dt class="col-sm-3">契約番号</dt><dd class="col-sm-9"><code>{{ $contract->code }}</code></dd>
-            <dt class="col-sm-3">状態</dt><dd class="col-sm-9">{{ $contract->status->label() }}</dd>
+            <dt class="col-sm-3">状態</dt>
+            <dd class="col-sm-9">
+                {{ $contract->status->label() }}
+                @if ($isSpecialPrice && ! $isCustomer)
+                    <span class="badge text-bg-danger ms-1">特価申請あり</span>
+                @endif
+            </dd>
             <dt class="col-sm-3">カスタマー</dt><dd class="col-sm-9">{{ $contract->customer?->code }} / {{ $contract->customer?->name }}</dd>
             <dt class="col-sm-3">拠点</dt><dd class="col-sm-9">{{ $contract->site?->name }}</dd>
             <dt class="col-sm-3">管理BP</dt><dd class="col-sm-9">{{ $contract->owningBp?->code }} / {{ $contract->owningBp?->name }}</dd>
@@ -101,6 +169,23 @@
             </dd>
             <dt class="col-sm-3">最低利用期間（契約時）</dt>
             <dd class="col-sm-9">{{ $contract->minimum_term_months_snapshot ? $contract->minimum_term_months_snapshot.'か月' : '—' }}</dd>
+            @if (! $isCustomer)
+                <dt class="col-sm-3">請求状態</dt>
+                <dd class="col-sm-9">
+                    @if ($contract->billing_suspended)
+                        <span class="badge text-bg-warning">請求停止</span>
+                    @endif
+                    @if ($contract->end_user_billing_disabled)
+                        <span class="badge text-bg-secondary">EU請求無効</span>
+                    @endif
+                    @if (! $contract->auto_invoice_enabled)
+                        <span class="badge text-bg-light border">自動請求OFF</span>
+                    @endif
+                    @if (! $contract->billing_suspended && ! $contract->end_user_billing_disabled && $contract->auto_invoice_enabled)
+                        <span class="text-muted">通常</span>
+                    @endif
+                </dd>
+            @endif
         </dl>
 
         @if (! $isCustomer)
@@ -111,20 +196,29 @@
                 @if ($status === 'activated')
                     <form method="POST" action="{{ route($prefix.'.contracts.revert-service', $contract) }}" class="d-inline">
                         @csrf
-                        <button class="btn btn-outline-warning btn-sm" type="submit" onclick="return confirm('承認済に戻します。よろしいですか？')">承認済に戻す</button>
+                        <button class="btn btn-outline-warning btn-sm" type="submit" onclick="return confirm('承認済・手配中に戻します。よろしいですか？')">承認済・手配中に戻す</button>
                     </form>
                     <button type="button" class="btn btn-outline-danger btn-sm" id="contractCancelOpen">解約</button>
                 @endif
                 @if ($status === 'draft' && ($deleteConfirmationCode ?? null))
-                    <button type="button" class="btn btn-outline-danger btn-sm" id="contractDeleteOpen">下書き削除</button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="contractDeleteOpen">オーダー削除</button>
                 @endif
             </div>
         @endif
     @endif
 
     @if ($activeTab === 'items')
+        @if ($isSpecialPrice && ! $isCustomer)
+            <div class="alert alert-info d-flex flex-wrap align-items-start gap-2 mb-3">
+                <span class="badge text-bg-danger">特価申請あり</span>
+                <div class="flex-grow-1">
+                    <div class="fw-semibold mb-1">特価申請内容</div>
+                    <div class="small mb-0" style="white-space:pre-wrap">{{ $contract->special_price_reason ?: '（理由未記入）' }}</div>
+                </div>
+            </div>
+        @endif
         @if ($status === 'draft' && ! $isCustomer)
-            <form method="POST" action="{{ route($prefix.'.contracts.prices', $contract) }}" class="mb-4">
+            <form method="POST" action="{{ route($prefix.'.contracts.prices', $contract) }}" class="mb-4" id="draft-prices-form">
                 @csrf
                 @method('PUT')
                 <h2 class="h5">明細・価格（承認前は変更可）</h2>
@@ -135,12 +229,18 @@
                                 <th>品目</th>
                                 <th>区分</th>
                                 <th>税率</th>
-                                <th>請求額（税別）</th>
-                                <th>仕切り（税別）</th>
+                                <th>エンドユーザー提供価格（税別）</th>
+                                <th class="js-draft-partition-col">仕切り（税別）</th>
+                                <th class="js-draft-partition-diff-col {{ $isSpecialPrice ? '' : 'd-none' }}">通常仕切りとの差</th>
                             </tr>
                         </thead>
                         <tbody>
                             @foreach ($contract->items as $line)
+                                @php
+                                    $standardPartition = $line->standard_partition_price !== null
+                                        ? (int) $line->standard_partition_price
+                                        : (int) $line->partition_price;
+                                @endphp
                                 <tr>
                                     <td>{{ $line->item?->code }} / {{ $line->item?->name }}</td>
                                     <td>{{ $line->item?->billing_type->label() }}</td>
@@ -149,16 +249,64 @@
                                         <input type="number" step="1" min="0" name="prices[{{ $line->id }}][unit_price]" class="form-control form-control-sm js-tax-exclusive" data-tax-rate="{{ $line->tax_rate }}" data-inclusive-target="unit-inc-{{ $line->id }}" value="{{ (int) $line->unit_price }}">
                                         <div class="small text-muted" id="unit-inc-{{ $line->id }}"></div>
                                     </td>
-                                    <td>
-                                        <input type="number" step="1" min="0" name="prices[{{ $line->id }}][partition_price]" class="form-control form-control-sm js-tax-exclusive" data-tax-rate="{{ $line->tax_rate }}" data-inclusive-target="part-inc-{{ $line->id }}" value="{{ (int) $line->partition_price }}">
+                                    <td class="js-draft-partition-col">
+                                        <input
+                                            type="number"
+                                            step="1"
+                                            min="0"
+                                            name="prices[{{ $line->id }}][partition_price]"
+                                            class="form-control form-control-sm js-tax-exclusive js-draft-partition"
+                                            data-tax-rate="{{ $line->tax_rate }}"
+                                            data-inclusive-target="part-inc-{{ $line->id }}"
+                                            data-standard-partition="{{ $standardPartition }}"
+                                            value="{{ (int) $line->partition_price }}"
+                                            @disabled(! $isSpecialPrice)
+                                        >
                                         <div class="small text-muted" id="part-inc-{{ $line->id }}"></div>
+                                    </td>
+                                    <td class="js-draft-partition-diff-col small {{ $isSpecialPrice ? '' : 'd-none' }}">
+                                        @if ($line->standard_partition_price === null)
+                                            —
+                                        @else
+                                            @php $delta = (int) $line->partition_price - (int) $line->standard_partition_price; @endphp
+                                            通常 {{ number_format((int) $line->standard_partition_price) }} 円
+                                            <br>
+                                            <span class="js-draft-partition-delta" data-line-id="{{ $line->id }}">
+                                                @if ($delta < 0)
+                                                    <span class="text-danger">▲ {{ number_format(abs($delta)) }}</span>
+                                                @else
+                                                    <span>{{ number_format($delta) }}</span>
+                                                @endif
+                                            </span>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach
                         </tbody>
                     </table>
                 </div>
-                <button class="btn btn-outline-primary btn-sm" type="submit">価格保存</button>
+
+                <div class="card card-body mb-3" style="max-width:40rem">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" value="1" name="special_price_requested" id="draft_special_price_requested" @checked(old('special_price_requested', $isSpecialPrice))>
+                        <label class="form-check-label" for="draft_special_price_requested">特価申請する</label>
+                    </div>
+                    <p class="small text-muted mb-2">チェックすると仕切りを変更でき、価格承認時に特価申請として扱います。理由の入力が必要です。</p>
+                    <div id="draft-special-price-fields" class="{{ old('special_price_requested', $isSpecialPrice) ? '' : 'd-none' }}">
+                        <label class="form-label" for="draft_special_price_reason">特価申請理由 <span class="text-danger">*</span></label>
+                        <textarea
+                            name="special_price_reason"
+                            id="draft_special_price_reason"
+                            class="form-control"
+                            rows="3"
+                            maxlength="2000"
+                            placeholder="特価が必要な理由を入力してください"
+                            @disabled(! old('special_price_requested', $isSpecialPrice))
+                        >{{ old('special_price_reason', $contract->special_price_reason) }}</textarea>
+                    </div>
+                </div>
+
+                <button class="btn btn-outline-primary btn-sm" type="submit" id="draft-prices-submit">価格保存</button>
             </form>
             <form method="POST" action="{{ route($prefix.'.contracts.submit-approval', $contract) }}" class="mb-3">
                 @csrf
@@ -172,9 +320,13 @@
                             <th>品目</th>
                             <th>区分</th>
                             <th>税率</th>
-                            <th>請求額</th>
+                            <th>エンドユーザー提供価格</th>
                             @unless ($isCustomer)
                                 <th>仕切り</th>
+                                @if ($isSpecialPrice)
+                                    <th>通常仕切り</th>
+                                    <th>価格差</th>
+                                @endif
                                 <th>ロック</th>
                             @endunless
                         </tr>
@@ -188,6 +340,27 @@
                                 <td>@include('partials.price-display', ['amount' => $line->unit_price, 'taxRate' => $line->tax_rate])</td>
                                 @unless ($isCustomer)
                                     <td>@include('partials.price-display', ['amount' => $line->partition_price, 'taxRate' => $line->tax_rate])</td>
+                                    @if ($isSpecialPrice)
+                                        <td>
+                                            @if ($line->standard_partition_price !== null)
+                                                @include('partials.price-display', ['amount' => $line->standard_partition_price, 'taxRate' => $line->tax_rate])
+                                            @else
+                                                —
+                                            @endif
+                                        </td>
+                                        <td class="small">
+                                            @if ($line->standard_partition_price === null)
+                                                —
+                                            @else
+                                                @php $delta = (int) $line->partition_price - (int) $line->standard_partition_price; @endphp
+                                                @if ($delta < 0)
+                                                    <span class="text-danger">▲ {{ number_format(abs($delta)) }}</span>
+                                                @else
+                                                    <span>{{ number_format($delta) }}</span>
+                                                @endif
+                                            @endif
+                                        </td>
+                                    @endif
                                     <td>{{ $line->price_locked ? '済' : '—' }}</td>
                                 @endunless
                             </tr>
@@ -198,7 +371,6 @@
         @endif
 
         @php
-            $actorBpId = $prefix === 'bp' ? (int) (auth('bp')->user()?->bp_id ?? 0) : null;
             $isOwningBp = $actorBpId !== null && $actorBpId === (int) $contract->owning_bp_id;
         @endphp
 
@@ -210,7 +382,7 @@
                     <div class="row g-2 mb-2 align-items-end">
                         <div class="col-md-3 small">{{ $line->item?->code }}（{{ $line->tax_rate }}%）</div>
                         <div class="col-md-3">
-                            <input type="number" step="1" min="0" name="prices[{{ $line->id }}][unit_price]" class="form-control form-control-sm" value="{{ (int) $line->unit_price }}" placeholder="請求額（税別）">
+                            <input type="number" step="1" min="0" name="prices[{{ $line->id }}][unit_price]" class="form-control form-control-sm" value="{{ (int) $line->unit_price }}" placeholder="エンドユーザー提供価格（税別）">
                         </div>
                         <div class="col-md-3">
                             <input type="number" step="1" min="0" name="prices[{{ $line->id }}][partition_price]" class="form-control form-control-sm" value="{{ (int) $line->partition_price }}" placeholder="仕切り（税別）">
@@ -222,24 +394,78 @@
         @endif
 
         @php
-            $pendingApplications = ($contract->applications ?? collect())
-                ->filter(fn ($application) => $application->status->value === 'pending')
-                ->values();
+            $pendingApplications = $pendingApplicationsForDecide;
         @endphp
         @if (! $isCustomer && $pendingApplications->isNotEmpty())
             @foreach ($pendingApplications as $application)
                 @php
-                    $canDecide = $prefix === 'admin'
-                        || ($prefix === 'bp' && $actorBpId === (int) $application->to_bp_id);
+                    $canDecide = true;
+                    $payload = is_array($application->payload_json) ? $application->payload_json : [];
+                    $payloadSpecial = (bool) ($payload['special_price'] ?? $isSpecialPrice);
+                    $payloadReason = $payload['special_price_reason'] ?? $contract->special_price_reason;
+                    $payloadItems = collect($payload['items'] ?? []);
                 @endphp
                 @if ($canDecide)
                     <div class="card card-body mb-3">
-                        <h2 class="h6 mb-1">{{ $application->type->label() }}（承認待ち）</h2>
-                        <p class="small text-muted mb-3">
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                            <h2 class="h6 mb-0">{{ $application->type->label() }}（承認待ち）</h2>
+                            @if ($application->approvalProgressLabel())
+                                <span class="badge text-bg-secondary">承認 {{ $application->approvalProgressLabel() }}</span>
+                            @endif
+                            @if ($payloadSpecial)
+                                <span class="badge text-bg-danger">特価申請あり</span>
+                            @endif
+                        </div>
+                        <p class="small text-muted mb-2">
                             from {{ $application->fromBp?->code ?? '—' }}
                             → to {{ $application->toBp?->code ?? '—' }}
                             ／ 金額 {{ number_format($application->amount ?? 0, 0) }} 円
+                            @if ($application->approvalProgressLabel())
+                                ／ 進捗 {{ $application->approvalProgressLabel() }}
+                                （残り {{ max(0, ($application->approvalProgress()['total'] ?? 1) - ($application->approvalProgress()['step'] ?? 1) + 1) }} 段階）
+                            @endif
                         </p>
+                        @if ($payloadSpecial)
+                            <div class="border rounded p-2 mb-3 bg-light">
+                                <div class="small fw-semibold mb-1">特価申請理由</div>
+                                <div class="small mb-2" style="white-space:pre-wrap">{{ $payloadReason ?: '（理由未記入）' }}</div>
+                                @if ($payloadItems->isNotEmpty())
+                                    <div class="table-responsive">
+                                        <table class="table table-sm mb-0">
+                                            <thead>
+                                                <tr>
+                                                    <th>明細ID</th>
+                                                    <th class="text-end">通常仕切り</th>
+                                                    <th class="text-end">希望仕切り</th>
+                                                    <th class="text-end">差額</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach ($payloadItems as $row)
+                                                    @php
+                                                        $std = (int) ($row['standard_partition_price'] ?? $row['partition_price'] ?? 0);
+                                                        $req = (int) ($row['partition_price'] ?? 0);
+                                                        $delta = $req - $std;
+                                                    @endphp
+                                                    <tr>
+                                                        <td>{{ $row['contract_item_id'] ?? '—' }}</td>
+                                                        <td class="text-end">{{ number_format($std) }}</td>
+                                                        <td class="text-end">{{ number_format($req) }}</td>
+                                                        <td class="text-end">
+                                                            @if ($delta < 0)
+                                                                <span class="text-danger">▲ {{ number_format(abs($delta)) }}</span>
+                                                            @else
+                                                                <span>{{ number_format($delta) }}</span>
+                                                            @endif
+                                                        </td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                @endif
+                            </div>
+                        @endif
                         <form method="POST" action="{{ route($prefix.'.applications.decide', $application) }}" class="row g-2 align-items-end">
                             @csrf
                             <div class="col-md-6">
@@ -261,6 +487,123 @@
                     </div>
                 @endif
             @endforeach
+        @endif
+    @endif
+
+    @if ($activeTab === 'billing' && ! $isCustomer)
+        @php $canManageBilling = $canManageBilling ?? false; @endphp
+        @if ($contract->billing_suspended)
+            <div class="alert alert-warning">この契約は<strong>請求停止</strong>中です（提供状態とは独立）。</div>
+        @endif
+        @if ($contract->end_user_billing_disabled)
+            <div class="alert alert-secondary">この契約は<strong>エンドユーザー請求が無効</strong>です（キックバックも対象外）。</div>
+        @endif
+
+        @if ($canManageBilling)
+            <form method="POST" action="{{ route($prefix.'.contracts.billing', $contract) }}">
+                @csrf
+                @method('PUT')
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input type="hidden" name="auto_invoice_enabled" value="0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auto_invoice_enabled" name="auto_invoice_enabled" value="1" @checked($contract->auto_invoice_enabled)>
+                            <label class="form-check-label" for="auto_invoice_enabled">月末自動請求</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input type="hidden" name="billing_suspended" value="0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="billing_suspended" name="billing_suspended" value="1" @checked($contract->billing_suspended)>
+                            <label class="form-check-label text-danger" for="billing_suspended">請求停止</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input type="hidden" name="end_user_billing_disabled" value="0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="end_user_billing_disabled" name="end_user_billing_disabled" value="1" @checked($contract->end_user_billing_disabled)>
+                            <label class="form-check-label" for="end_user_billing_disabled">EU請求無効（契約）</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input type="hidden" name="bill_initial_in_system" value="0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="bill_initial_in_system" name="bill_initial_in_system" value="1" @checked($contract->bill_initial_in_system)>
+                            <label class="form-check-label" for="bill_initial_in_system">イニシャルを本システムで請求</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            <input type="hidden" name="recalc_on_price_change" value="0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="recalc_on_price_change" name="recalc_on_price_change" value="1" @checked($contract->recalc_on_price_change)>
+                            <label class="form-check-label" for="recalc_on_price_change">価格変更後に未入金請求を再計算</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="kickback_start_year_month">キックバック開始月（YYYYMM・空欄で自動）</label>
+                        <input
+                            type="text"
+                            class="form-control form-control-sm"
+                            id="kickback_start_year_month"
+                            name="kickback_start_year_month"
+                            value="{{ old('kickback_start_year_month', $contract->kickback_start_year_month) }}"
+                            maxlength="6"
+                            pattern="\d{6}"
+                            placeholder="{{ $contract->effectiveKickbackStartYearMonth() ?? '例: 202702' }}"
+                        >
+                        <div class="form-text">未設定時の開始月: {{ $contract->effectiveKickbackStartYearMonth() ?? '—' }}</div>
+                    </div>
+                </div>
+
+                <h2 class="h6 mb-2">明細ごとの上書き</h2>
+                <p class="small text-muted">空欄は契約値を継承します。</p>
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                        <tr>
+                            <th>品目</th>
+                            <th>イニシャル請求</th>
+                            <th>EU請求無効</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach ($contract->items as $line)
+                            <tr>
+                                <td>
+                                    <code>{{ $line->item?->code }}</code>
+                                    {{ $line->item?->name }}
+                                    <span class="text-muted small">({{ $line->item?->billing_type?->label() }})</span>
+                                </td>
+                                <td>
+                                    <select name="items[{{ $line->id }}][bill_initial_in_system]" class="form-select form-select-sm" style="max-width: 10rem;">
+                                        <option value="" @selected($line->bill_initial_in_system === null)>継承</option>
+                                        <option value="1" @selected($line->bill_initial_in_system === true)>ON</option>
+                                        <option value="0" @selected($line->bill_initial_in_system === false)>OFF</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select name="items[{{ $line->id }}][end_user_billing_disabled]" class="form-select form-select-sm" style="max-width: 10rem;">
+                                        <option value="" @selected($line->end_user_billing_disabled === null)>継承</option>
+                                        <option value="1" @selected($line->end_user_billing_disabled === true)>無効</option>
+                                        <option value="0" @selected($line->end_user_billing_disabled === false)>有効</option>
+                                    </select>
+                                </td>
+                            </tr>
+                        @endforeach
+                        </tbody>
+                    </table>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">請求設定を保存</button>
+            </form>
+        @else
+            <dl class="row mb-0">
+                <dt class="col-sm-4">月末自動請求</dt><dd class="col-sm-8">{{ $contract->auto_invoice_enabled ? 'ON' : 'OFF' }}</dd>
+                <dt class="col-sm-4">請求停止</dt><dd class="col-sm-8">{{ $contract->billing_suspended ? '停止中' : 'なし' }}</dd>
+                <dt class="col-sm-4">EU請求無効</dt><dd class="col-sm-8">{{ $contract->end_user_billing_disabled ? '無効' : '有効' }}</dd>
+                <dt class="col-sm-4">イニシャル本システム請求</dt><dd class="col-sm-8">{{ $contract->bill_initial_in_system ? 'ON' : 'OFF' }}</dd>
+                <dt class="col-sm-4">価格変更後再計算</dt><dd class="col-sm-8">{{ $contract->recalc_on_price_change ? 'ON' : 'OFF' }}</dd>
+                <dt class="col-sm-4">キックバック開始月</dt><dd class="col-sm-8">{{ $contract->effectiveKickbackStartYearMonth() ?? '—' }}</dd>
+            </dl>
         @endif
     @endif
 
@@ -296,6 +639,36 @@
                 @endif
             @endif
 
+            @if (! $isCustomer && in_array($status, ['approved', 'activated'], true))
+                <div class="card mb-3 border-primary-subtle">
+                    <div class="card-body">
+                        <h3 class="h6">契約共通データ</h3>
+                        <p class="text-muted small">全品目の Document 置換に共通で使われます。品目データに同じ置換コードがある場合は品目側が優先されます（最大 {{ \App\Domains\Contract\Services\ContractService::MAX_DATA_ROWS }} 行）。</p>
+                        <form method="POST" action="{{ route($prefix.'.contracts.data', $contract) }}">
+                            @csrf
+                            @method('PUT')
+                            @include('partials.contract-data-rows', [
+                                'existingRows' => $contract->dataRows,
+                                'dataFieldNames' => $dataFieldNames,
+                                'maxRows' => \App\Domains\Contract\Services\ContractService::MAX_DATA_ROWS,
+                            ])
+                            <button class="btn btn-primary btn-sm" type="submit">共通データを保存</button>
+                        </form>
+                    </div>
+                </div>
+            @elseif ($contract->dataRows->isNotEmpty())
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h3 class="h6">契約共通データ</h3>
+                        <ul class="mb-0">
+                            @foreach ($contract->dataRows as $row)
+                                <li><strong>{{ $row->name }}</strong> <code>{{ $row->replace_code }}</code>: {{ $row->value }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                </div>
+            @endif
+
             @foreach ($contract->items as $line)
                 <div class="card mb-3">
                     <div class="card-body">
@@ -309,37 +682,15 @@
                             <p class="text-warning small">この品目にはテンプレートが未登録のため、PDF は生成されません。</p>
                         @endif
                         @if (! $isCustomer && in_array($status, ['approved', 'activated'], true))
+                            <p class="text-muted small">この品目固有のデータ（最大 {{ \App\Domains\Contract\Services\ContractService::MAX_DATA_ROWS }} 行）。</p>
                             <form method="POST" action="{{ route($prefix.'.contracts.items.data', $line) }}">
                                 @csrf
                                 @method('PUT')
-                                @php $existing = $line->dataRows; @endphp
-                                @for ($i = 0; $i < max(3, $existing->count() + 1); $i++)
-                                    @php $row = $existing[$i] ?? null; @endphp
-                                    <div class="row g-2 mb-2">
-                                        <div class="col-md-3">
-                                            <select name="rows[{{ $i }}][data_field_name_id]" class="form-select form-select-sm js-data-field-select">
-                                                <option value="">（直接入力）</option>
-                                                @foreach ($dataFieldNames as $field)
-                                                    <option
-                                                        value="{{ $field->id }}"
-                                                        data-replace-code="{{ $field->replace_code }}"
-                                                        data-name="{{ $field->name }}"
-                                                        @selected((int) ($row?->data_field_name_id) === $field->id)
-                                                    >{{ $field->name }} ({{ $field->replace_code }})</option>
-                                                @endforeach
-                                            </select>
-                                        </div>
-                                        <div class="col-md-2">
-                                            <input type="text" name="rows[{{ $i }}][name]" class="form-control form-control-sm js-data-field-name" placeholder="名称" value="{{ $row?->name }}">
-                                        </div>
-                                        <div class="col-md-2">
-                                            <input type="text" name="rows[{{ $i }}][replace_code]" class="form-control form-control-sm js-data-field-code" placeholder="置換コード" pattern="[a-z][a-z0-9_]*" value="{{ $row?->replace_code }}">
-                                        </div>
-                                        <div class="col-md-3">
-                                            <input type="text" name="rows[{{ $i }}][value]" class="form-control form-control-sm" placeholder="値" value="{{ $row?->value }}">
-                                        </div>
-                                    </div>
-                                @endfor
+                                @include('partials.contract-data-rows', [
+                                    'existingRows' => $line->dataRows,
+                                    'dataFieldNames' => $dataFieldNames,
+                                    'maxRows' => \App\Domains\Contract\Services\ContractService::MAX_DATA_ROWS,
+                                ])
                                 <button class="btn btn-primary btn-sm" type="submit">データ保存</button>
                             </form>
                         @else
@@ -429,30 +780,9 @@
     @endif
 
     @if ($activeTab === 'messages')
-        <div class="mb-3" style="max-width:40rem">
-            @forelse ($contract->messages as $message)
-                <div class="border rounded p-2 mb-2">
-                    <div class="small text-muted">
-                        {{ $message->user?->name ?? '不明' }}
-                        <span class="ms-2">{{ $message->created_at }}</span>
-                    </div>
-                    <div>{{ $message->body }}</div>
-                </div>
-            @empty
-                <p class="text-muted">メッセージはまだありません。</p>
-            @endforelse
+        <div style="max-width:40rem">
+            <livewire:contract-chat :contract-id="$contract->id" :route-prefix="$prefix" :key="'contract-chat-'.$contract->id" />
         </div>
-
-        @if ($canPostMessages)
-            <form method="POST" action="{{ route($prefix.'.contracts.messages.store', $contract) }}" style="max-width:40rem">
-                @csrf
-                <label class="form-label" for="message_body">メッセージ</label>
-                <textarea name="body" id="message_body" class="form-control mb-2" rows="3" maxlength="2000" required>{{ old('body') }}</textarea>
-                <button class="btn btn-primary btn-sm" type="submit">投稿</button>
-            </form>
-        @else
-            <p class="text-muted small">サービス提供開始後はメッセージを投稿できません（閲覧のみ）。</p>
-        @endif
     @endif
 
     @if ($activeTab === 'history')
@@ -544,7 +874,7 @@
             <form method="POST" action="{{ route($prefix.'.contracts.destroy', $contract) }}" class="p-4">
                 @csrf
                 @method('DELETE')
-                <h2 class="h5 mb-3">下書き削除の確認</h2>
+                <h2 class="h5 mb-3">オーダー削除の確認</h2>
                 <p class="mb-2">「{{ $contract->code }}」を削除します。</p>
                 <p class="mb-3">下の確認コードを入力してください。</p>
                 <p class="text-center mb-3">
@@ -724,24 +1054,139 @@
             sync();
         });
 
-        document.querySelectorAll('.js-data-field-select').forEach((select) => {
-            const row = select.closest('.row');
-            const nameInput = row?.querySelector('.js-data-field-name');
-            const codeInput = row?.querySelector('.js-data-field-code');
-            const apply = () => {
-                const option = select.selectedOptions[0];
-                if (!option || !option.value) {
-                    if (codeInput) codeInput.readOnly = false;
-                    return;
+        (function () {
+            const toggle = document.getElementById('draft_special_price_requested');
+            const fields = document.getElementById('draft-special-price-fields');
+            const reason = document.getElementById('draft_special_price_reason');
+            const submit = document.getElementById('draft-prices-submit');
+            const partitionInputs = document.querySelectorAll('.js-draft-partition');
+            const diffCols = document.querySelectorAll('.js-draft-partition-diff-col');
+            if (!toggle) {
+                return;
+            }
+
+            function syncDraftSpecial() {
+                const on = toggle.checked;
+                if (fields) {
+                    fields.classList.toggle('d-none', !on);
                 }
-                if (nameInput) nameInput.value = option.dataset.name || '';
-                if (codeInput) {
-                    codeInput.value = option.dataset.replaceCode || '';
-                    codeInput.readOnly = true;
+                diffCols.forEach(function (col) {
+                    col.classList.toggle('d-none', !on);
+                });
+                partitionInputs.forEach(function (input) {
+                    input.disabled = !on;
+                    input.required = on;
+                });
+                if (reason) {
+                    reason.disabled = !on;
+                    reason.required = on;
+                }
+                if (submit) {
+                    submit.textContent = on ? '特価申請内容を保存' : '価格保存';
+                }
+            }
+
+            partitionInputs.forEach(function (input) {
+                input.addEventListener('input', function () {
+                    const standard = Number(input.getAttribute('data-standard-partition') || 0);
+                    const requested = Number(input.value || 0);
+                    const delta = requested - standard;
+                    const row = input.closest('tr');
+                    const deltaEl = row ? row.querySelector('.js-draft-partition-delta') : null;
+                    if (!deltaEl) {
+                        return;
+                    }
+                    if (delta < 0) {
+                        deltaEl.innerHTML = '<span class="text-danger">▲ ' + Math.abs(delta).toLocaleString('ja-JP') + '</span>';
+                    } else {
+                        deltaEl.innerHTML = '<span>' + delta.toLocaleString('ja-JP') + '</span>';
+                    }
+                });
+            });
+
+            toggle.addEventListener('change', syncDraftSpecial);
+            syncDraftSpecial();
+        })();
+
+        document.querySelectorAll('.js-data-row-list').forEach((list) => {
+            const maxRows = Number(list.dataset.maxRows || 10);
+            const form = list.closest('form');
+            const addButton = form?.querySelector('.js-data-row-add');
+            const countEl = form?.querySelector('.js-data-row-count');
+
+            const bindSelect = (select) => {
+                const row = select.closest('.js-data-row');
+                const nameInput = row?.querySelector('.js-data-field-name');
+                const codeInput = row?.querySelector('.js-data-field-code');
+                const apply = () => {
+                    const option = select.selectedOptions[0];
+                    if (!option || !option.value) {
+                        if (codeInput) codeInput.readOnly = false;
+                        return;
+                    }
+                    if (nameInput) nameInput.value = option.dataset.name || '';
+                    if (codeInput) {
+                        codeInput.value = option.dataset.replaceCode || '';
+                        codeInput.readOnly = true;
+                    }
+                };
+                select.addEventListener('change', apply);
+                apply();
+            };
+
+            const reindex = () => {
+                list.querySelectorAll('.js-data-row').forEach((row, index) => {
+                    row.querySelectorAll('[name]').forEach((input) => {
+                        input.name = input.name.replace(/rows\[\d+]/, 'rows[' + index + ']');
+                    });
+                });
+                const count = list.querySelectorAll('.js-data-row').length;
+                if (countEl) {
+                    countEl.textContent = count + ' / ' + maxRows + ' 行';
+                }
+                if (addButton) {
+                    addButton.disabled = count >= maxRows;
                 }
             };
-            select.addEventListener('change', apply);
-            apply();
+
+            list.querySelectorAll('.js-data-field-select').forEach(bindSelect);
+
+            list.addEventListener('click', (event) => {
+                const remove = event.target.closest('.js-data-row-remove');
+                if (!remove) return;
+                const rows = list.querySelectorAll('.js-data-row');
+                if (rows.length <= 1) {
+                    const row = rows[0];
+                    row.querySelectorAll('input').forEach((input) => { input.value = ''; });
+                    const select = row.querySelector('select');
+                    if (select) {
+                        select.value = '';
+                        select.dispatchEvent(new Event('change'));
+                    }
+                    return;
+                }
+                remove.closest('.js-data-row')?.remove();
+                reindex();
+            });
+
+            addButton?.addEventListener('click', () => {
+                const rows = list.querySelectorAll('.js-data-row');
+                if (rows.length >= maxRows) return;
+                const clone = rows[0].cloneNode(true);
+                clone.querySelectorAll('input').forEach((input) => { input.value = ''; });
+                const select = clone.querySelector('select');
+                if (select) {
+                    select.value = '';
+                }
+                const codeInput = clone.querySelector('.js-data-field-code');
+                if (codeInput) codeInput.readOnly = false;
+                list.appendChild(clone);
+                const newSelect = clone.querySelector('.js-data-field-select');
+                if (newSelect) bindSelect(newSelect);
+                reindex();
+            });
+
+            reindex();
         });
     });
 </script>

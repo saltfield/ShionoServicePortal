@@ -24,3 +24,4 @@
 
 - 計画: [phase11-plan.md](phase11-plan.md)
 - 前フェーズ: [phase10-setup.md](phase10-setup.md)
+- デプロイ: [deploy.md](deploy.md)

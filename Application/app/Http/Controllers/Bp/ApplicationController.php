@@ -24,7 +24,8 @@ class ApplicationController extends Controller
             ->with(['contract', 'fromBp', 'toBp'])
             ->where('to_bp_id', $actor->bp_id)
             ->where('status', 'pending')
-            ->latest()
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->paginate(20);
 
         return view('admin.applications.index', [

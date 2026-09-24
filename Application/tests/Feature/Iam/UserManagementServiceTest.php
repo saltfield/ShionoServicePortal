@@ -431,6 +431,40 @@ it('allows bp owner http user management within scope', function () {
     expect(User::query()->where('login_id', 'BPHTTPCUS')->exists())->toBeTrue();
 });
 
+it('does not force password change when bp creates user without the checkbox', function () {
+    $tree = userMgmtBpOwner();
+
+    $this->post(route('bp.login.store'), [
+        'login_id' => 'UMBPOWNER',
+        'bpn' => $tree['root']->code,
+        'password' => 'Password123!',
+    ])->assertRedirect(route('bp.dashboard'));
+
+    $this->post(route('bp.users.store'), [
+        'user_type' => 'bp',
+        'login_id' => 'BPNOFORCE',
+        'name' => 'No Force Change',
+        'bp_id' => $tree['root']->id,
+        'role_code' => 'bp_sales',
+        'password' => 'Password123!',
+        'password_confirmation' => 'Password123!',
+        'is_active' => '1',
+        // must_change_password 未送信 = チェックオフ
+    ])->assertRedirect();
+
+    $created = User::query()->where('login_id', 'BPNOFORCE')->first();
+    expect($created)->not->toBeNull()
+        ->and($created->must_change_password)->toBeFalse();
+
+    auth('bp')->logout();
+
+    $this->post(route('bp.login.store'), [
+        'login_id' => 'BPNOFORCE',
+        'bpn' => $tree['root']->code,
+        'password' => 'Password123!',
+    ])->assertRedirect(route('bp.dashboard'));
+});
+
 it('limits bp header user management to own bp and manages child users on bp detail', function () {
     $tree = userMgmtBpOwner();
     $childUser = User::factory()->bp($tree['child'])->create([

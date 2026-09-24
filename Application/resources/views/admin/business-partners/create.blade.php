@@ -7,16 +7,18 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">BP新規作成</h1>
-        <a href="{{ route(($routePrefix ?? 'admin').'.business-partners.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
-    </div>
+    @php $prefix = $routePrefix ?? 'admin'; @endphp
+    @include('partials.breadcrumb', [
+        'crumbs' => [['label' => 'BP管理', 'url' => route($prefix.'.business-partners.index')]],
+        'current' => 'BP新規作成',
+    ])
+    <h1 class="h3 mb-3">BP新規作成</h1>
 
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif
 
-    <form method="POST" action="{{ route(($routePrefix ?? 'admin').'.business-partners.store') }}" class="card card-body" style="max-width:40rem">
+    <form method="POST" action="{{ route($prefix.'.business-partners.store') }}" class="card card-body" style="max-width:40rem">
         @csrf
         <div class="mb-3">
             <label class="form-label" for="name">BP名</label>
@@ -40,7 +42,7 @@
             <label class="form-label" for="two_factor_mode">2FAモード</label>
             <select id="two_factor_mode" name="two_factor_mode" class="form-select" required>
                 @foreach ($modes as $mode)
-                    <option value="{{ $mode->value }}" @selected(old('two_factor_mode', 'optional') === $mode->value)>{{ $mode->value }}</option>
+                    <option value="{{ $mode->value }}" @selected(old('two_factor_mode', 'optional') === $mode->value)>{{ $mode->label() }}</option>
                 @endforeach
             </select>
         </div>

@@ -18,14 +18,18 @@ class Invoice extends Model
         'contract_id',
         'customer_id',
         'owning_bp_id',
+        'issuer_bp_id',
+        'source',
+        'billing_batch_run_id',
         'billing_year_month',
+        'due_year_month',
         'status',
         'subtotal',
         'tax_total',
         'total',
         'issued_at',
         'paid_at',
-        'cancelled_at',
+        'withdrawn_at',
         'note',
     ];
 
@@ -38,7 +42,7 @@ class Invoice extends Model
             'total' => 'integer',
             'issued_at' => 'datetime',
             'paid_at' => 'datetime',
-            'cancelled_at' => 'datetime',
+            'withdrawn_at' => 'datetime',
         ];
     }
 
@@ -64,6 +68,16 @@ class Invoice extends Model
     public function owningBp(): BelongsTo
     {
         return $this->belongsTo(BusinessPartner::class, 'owning_bp_id');
+    }
+
+    public function issuerBp(): BelongsTo
+    {
+        return $this->belongsTo(BusinessPartner::class, 'issuer_bp_id');
+    }
+
+    public function batchRun(): BelongsTo
+    {
+        return $this->belongsTo(BillingBatchRun::class, 'billing_batch_run_id');
     }
 
     public function lines(): HasMany

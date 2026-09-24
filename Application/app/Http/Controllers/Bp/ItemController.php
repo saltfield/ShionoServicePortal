@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Bp;
 
 use App\Domains\Catalog\Enums\BillingType;
 use App\Domains\Catalog\Services\CatalogPricingService;
+use App\Domains\Catalog\Support\ItemTypeOptions;
 use App\Domains\Iam\Services\RbacService;
 use App\Http\Controllers\Concerns\ConfirmsItemDeletion;
 use App\Http\Controllers\Concerns\ConfirmsItemDocumentDeletion;
@@ -60,6 +61,7 @@ class ItemController extends Controller
         return view('admin.items.create', [
             'routePrefix' => 'bp',
             'billingTypes' => BillingType::cases(),
+            'itemTypes' => ItemTypeOptions::selectable($bp->id),
             'requiredCandidates' => $this->requiredCandidates($bp->id),
             'formMode' => 'bp_owned',
         ]);
@@ -74,6 +76,12 @@ class ItemController extends Controller
 
         $validated = $this->validatedItem($request);
         $validated['owning_bp_id'] = $bp->id;
+
+        try {
+            ItemTypeOptions::assertAssignable((int) $validated['item_type_id'], $bp->id);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['item_type_id' => $exception->getMessage()]);
+        }
 
         try {
             $item = $service->createItem($actor, $validated);
@@ -93,6 +101,8 @@ class ItemController extends Controller
         $bp = $actor->businessPartner;
         abort_unless($bp, 403);
         $this->assertVisible($item, $bp);
+
+        $item->loadMissing('itemType');
 
         $documents = $item->documents()
             ->where(function ($query) use ($bp) {
@@ -161,6 +171,7 @@ class ItemController extends Controller
             'item' => $item,
             'routePrefix' => 'bp',
             'billingTypes' => BillingType::cases(),
+            'itemTypes' => ItemTypeOptions::selectable($bp->id, $item->item_type_id ? (int) $item->item_type_id : null),
             'requiredCandidates' => $this->requiredCandidates($bp->id, $item->id),
             'formMode' => 'bp_owned',
         ]);
@@ -175,6 +186,12 @@ class ItemController extends Controller
         $this->assertOwnedBy($item, $bp);
 
         $validated = $this->validatedItem($request);
+
+        try {
+            ItemTypeOptions::assertAssignable((int) $validated['item_type_id'], $bp->id);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['item_type_id' => $exception->getMessage()]);
+        }
 
         try {
             $service->updateItem($actor, $item, $validated);
@@ -246,6 +263,7 @@ class ItemController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:2000'],
             'billing_type' => ['required', Rule::enum(BillingType::class)],
+            'item_type_id' => ['required', 'integer', 'exists:item_types,id'],
             'required_item_id' => ['nullable', 'integer', 'exists:items,id'],
             'partition_price' => ['required', 'integer', 'min:0'],
             'recommended_price' => ['required', 'integer', 'min:0'],
@@ -259,6 +277,7 @@ class ItemController extends Controller
         $validated['required_item_id'] = $validated['required_item_id'] ?? null;
         $validated['tax_rate'] = (int) $validated['tax_rate'];
         $validated['minimum_term_months'] = $validated['minimum_term_months'] ?? null;
+        $validated['item_type_id'] = (int) $validated['item_type_id'];
 
         return $validated;
     }

@@ -13,12 +13,10 @@
     $expiresTime = old('expires_time', $expiresTime ?? '');
 @endphp
 
-<nav aria-label="breadcrumb">
-    <ol class="breadcrumb small mb-2">
-        <li class="breadcrumb-item"><a href="{{ route($prefix.'.announcements.index') }}">お知らせ</a></li>
-        <li class="breadcrumb-item active" aria-current="page">{{ $isEdit ? 'お知らせ編集' : 'お知らせ登録' }}</li>
-    </ol>
-</nav>
+@include('partials.breadcrumb', [
+    'crumbs' => [['label' => 'お知らせ', 'url' => route($prefix.'.announcements.index')]],
+    'current' => $isEdit ? 'お知らせ編集' : 'お知らせ登録',
+])
 
 <h1 class="h3 mb-3">{{ $isEdit ? 'お知らせ編集' : 'お知らせ登録' }}</h1>
 @if ($errors->any())

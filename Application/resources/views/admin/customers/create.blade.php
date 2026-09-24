@@ -7,6 +7,15 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
+    @php
+        $prefix = $routePrefix ?? 'admin';
+        $managingBpId = old('managing_bp_id', $selectedManagingBpId ?? null);
+        $listUrl = route($prefix.'.customers.index', array_filter(['managing_bp_id' => $managingBpId]));
+    @endphp
+    @include('partials.breadcrumb', [
+        'crumbs' => [['label' => 'カスタマー', 'url' => $listUrl]],
+        'current' => 'カスタマー新規作成',
+    ])
     <h1 class="h3 mb-3">カスタマー新規作成</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>

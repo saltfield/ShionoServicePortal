@@ -20,6 +20,7 @@ class Item extends Model
         'name',
         'description',
         'billing_type',
+        'item_type_id',
         'required_item_id',
         'partition_price',
         'recommended_price',
@@ -55,6 +56,11 @@ class Item extends Model
     public function owningBp(): BelongsTo
     {
         return $this->belongsTo(BusinessPartner::class, 'owning_bp_id');
+    }
+
+    public function itemType(): BelongsTo
+    {
+        return $this->belongsTo(ItemType::class);
     }
 
     public function isBpOwned(): bool

@@ -13,14 +13,19 @@
         $canViewContracts = $canViewContracts ?? false;
         $canCreateContracts = $canCreateContracts ?? false;
         $canViewTickets = ($prefix === 'admin') && ($canViewTickets ?? false);
+        $canViewInvoices = $canViewInvoices ?? false;
         $customerContracts = $customerContracts ?? collect();
         $customerTickets = $customerTickets ?? collect();
+        $customerInvoices = $customerInvoices ?? null;
         $allowedTabs = ['overview', 'sites'];
         if ($canManageUsers) {
             $allowedTabs[] = 'users';
         }
         if ($canViewContracts) {
             $allowedTabs[] = 'contracts';
+        }
+        if ($canViewInvoices) {
+            $allowedTabs[] = 'invoices';
         }
         $allowedTabs[] = 'prices';
         if ($canViewTickets) {
@@ -35,11 +40,16 @@
             'sites' => '拠点',
             'users' => 'ユーザー管理',
             'contracts' => '契約',
+            'invoices' => '請求',
             'prices' => '価格',
             'tickets' => 'チケット',
         ];
     @endphp
 
+    @include('partials.breadcrumb', [
+        'crumbs' => [['label' => 'カスタマー', 'url' => route($prefix.'.customers.index', ['managing_bp_id' => $customer->managing_bp_id])]],
+        'current' => 'カスタマー詳細',
+    ])
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <h1 class="h3 mb-0">カスタマー詳細</h1>
@@ -61,11 +71,10 @@
                 <a
                     href="{{ route($prefix.'.contracts.create', ['customer_id' => $customer->id, 'return_customer_id' => $customer->id]) }}"
                     class="btn btn-primary btn-sm"
-                >新規申込</a>
+                >オーダー作成</a>
             @elseif ($activeTab === 'prices')
                 <a href="{{ route($prefix.'.customers.prices.edit', $customer) }}" class="btn btn-primary btn-sm">価格編集</a>
             @endif
-            <a href="{{ route($prefix.'.customers.index', ['managing_bp_id' => $customer->managing_bp_id]) }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
         </div>
     </div>
 
@@ -181,6 +190,8 @@
                     <th>拠点</th>
                     <th>管理BP</th>
                     <th>状態</th>
+                    <th>申し込み日</th>
+                    <th>サービス提供日</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -193,10 +204,26 @@
                         </td>
                         <td>{{ $contract->site?->name ?? '-' }}</td>
                         <td>{{ $contract->owningBp?->code ?? '-' }}</td>
-                        <td>{{ $contract->status->label() }}</td>
+                        <td>{{ $contract->status->label() }}
+                            @if ($contract->special_price_requested)
+                                <span class="badge text-bg-danger ms-1">特価申請あり</span>
+                            @endif
+                            @if ($contract->status->value === 'activated' && $contract->billing_suspended)
+                                <span class="badge text-bg-warning ms-1">請求停止</span>
+                            @endif
+                            @if ($contract->status->value === 'activated' && $contract->end_user_billing_disabled)
+                                <span class="badge text-bg-secondary ms-1">EU請求無効</span>
+                            @endif
+                        </td>
+                        <td class="small text-nowrap">
+                            {{ $contract->applied_at?->timezone(config('app.timezone'))->format('Y-m-d H:i') ?? '—' }}
+                        </td>
+                        <td class="small text-nowrap">
+                            {{ $contract->activated_at?->timezone(config('app.timezone'))->format('Y-m-d') ?? '—' }}
+                        </td>
                     </tr>
                 @empty
-                    <tr><td colspan="4" class="text-muted text-center">契約なし</td></tr>
+                    <tr><td colspan="6" class="text-muted text-center">契約なし</td></tr>
                 @endforelse
                 </tbody>
             </table>
@@ -206,6 +233,44 @@
     @if ($activeTab === 'prices')
         <p class="mb-3">このカスタマー向けの販売価格を設定・確認します。</p>
         <a href="{{ route($prefix.'.customers.prices.edit', $customer) }}" class="btn btn-outline-primary btn-sm">カスタマー価格を開く</a>
+    @endif
+
+    @if ($activeTab === 'invoices' && $canViewInvoices)
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                <tr>
+                    <th>請求番号</th>
+                    <th>請求月</th>
+                    <th>契約</th>
+                    <th>発行BP</th>
+                    <th class="text-end">税込合計</th>
+                    <th>状態</th>
+                </tr>
+                </thead>
+                <tbody>
+                @forelse ($customerInvoices ?? [] as $invoice)
+                    <tr>
+                        <td>
+                            <a href="{{ route($prefix.'.invoices.show', $invoice) }}">
+                                <code>{{ $invoice->code }}</code>
+                            </a>
+                        </td>
+                        <td>{{ $invoice->billing_year_month }}</td>
+                        <td><code>{{ $invoice->contract?->code }}</code></td>
+                        <td>{{ $invoice->issuerBp?->code ?? '—' }}</td>
+                        <td class="text-end">{{ number_format($invoice->total) }}</td>
+                        <td>{{ $invoice->status->label() }}</td>
+                    </tr>
+                @empty
+                    <tr><td colspan="6" class="text-muted text-center py-4">請求はありません。</td></tr>
+                @endforelse
+                </tbody>
+            </table>
+        </div>
+        @if ($customerInvoices)
+            {{ $customerInvoices->links() }}
+        @endif
     @endif
 
     @if ($activeTab === 'tickets' && $canViewTickets)

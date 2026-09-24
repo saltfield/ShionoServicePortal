@@ -2,19 +2,21 @@
 
 Shiono Service Portal のアプリケーション本体です。
 
-## スタック（Step 2-0 時点）
+## スタック
 
 - Laravel 11.x / PHP 8.3
 - Livewire 3
 - Bootstrap 5（Vite）
 - Pest 3
-- `pragmarx/google2fa-laravel` + `bacon/bacon-qr-code`（2FA用・実装は Step 2-4）
+- Dompdf + Noto Sans CJK（契約 PDF）
+- `pragmarx/google2fa-laravel` + `bacon/bacon-qr-code`（2FA）
 
 ## 起動
 
 ```bash
 cd ../Develop
-docker compose up -d
+docker compose up -d --build
+docker compose exec -u www-data php php artisan migrate --seed
 ```
 
 - Web: http://localhost:8080
@@ -22,17 +24,27 @@ docker compose up -d
 
 ```bash
 # コンテナ内
-docker compose exec php php artisan migrate
-docker compose exec php ./vendor/bin/pest
+docker compose exec -u www-data php php artisan migrate
+docker compose exec -u www-data php ./vendor/bin/pest
 
 # フロントビルド（Node コンテナ例）
-docker run --rm -v "$PWD/../Application:/app" -w /app node:22-bookworm npm run build
+docker run --rm -v "$PWD/../Application:/app" -w /app node:22-bookworm \
+  bash -lc "npm ci && npm run build"
 ```
+
+デプロイ・本番更新は [Document/architecture/deploy.md](../Document/architecture/deploy.md)。
 
 ## ディレクトリ方針
 
 ```text
-app/Domains/Auth|Iam   # ドメインサービス（Step 2-1〜）
+app/Domains/Auth|Iam|Billing|Contract|Catalog|…
 app/Http/Controllers/{Admin,Bp,Customer}
-app/Livewire/{Admin,Bp,Customer}
+resources/views/{admin,bp,customer,auth,layouts}
 ```
+
+## 請求バッチ（Phase 10）
+
+- スケジュール定義: `routes/console.php`
+- 手動: `php artisan billing:run-monthly --month=YYYYMM`
+- UI: `/admin/billing-batch`（履歴・作成請求一覧）
+- **Scheduler コンテナ必須**（`Develop` の `scheduler` サービス）

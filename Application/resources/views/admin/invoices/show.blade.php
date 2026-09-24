@@ -6,10 +6,11 @@
 @endsection
 
 @section('content')
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">請求詳細</h1>
-        <a href="{{ route(($routePrefix ?? 'admin').'.invoices.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
-    </div>
+    @include('partials.breadcrumb', [
+        'crumbs' => [['label' => '請求一覧', 'url' => route(($routePrefix ?? 'admin').'.invoices.index')]],
+        'current' => '請求詳細',
+    ])
+    <h1 class="h3 mb-3">請求詳細</h1>
 
     @if (session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>

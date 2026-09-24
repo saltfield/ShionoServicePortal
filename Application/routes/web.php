@@ -14,9 +14,12 @@ use App\Http\Controllers\Admin\CustomerPriceController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\DataFieldNameController;
 use App\Http\Controllers\Admin\InquiryController;
+use App\Http\Controllers\Admin\BillingBatchSettingsController;
 use App\Http\Controllers\Admin\InvoiceController;
+use App\Http\Controllers\Admin\KickbackInvoiceController;
 use App\Http\Controllers\Admin\ItemController;
 use App\Http\Controllers\Admin\ItemDocumentController;
+use App\Http\Controllers\Admin\ItemTypeController;
 use App\Http\Controllers\Admin\SiteController;
 use App\Http\Controllers\Admin\UserPrivilegeController;
 use App\Http\Controllers\Admin\WholesalePriceController;
@@ -32,8 +35,10 @@ use App\Http\Controllers\Bp\CustomerPriceController as BpCustomerPriceController
 use App\Http\Controllers\Bp\DashboardController as BpDashboardController;
 use App\Http\Controllers\Bp\InquiryController as BpInquiryController;
 use App\Http\Controllers\Bp\InvoiceController as BpInvoiceController;
+use App\Http\Controllers\Bp\KickbackInvoiceController as BpKickbackInvoiceController;
 use App\Http\Controllers\Bp\ItemController as BpItemController;
 use App\Http\Controllers\Bp\ItemDocumentController as BpItemDocumentController;
+use App\Http\Controllers\Bp\ItemTypeController as BpItemTypeController;
 use App\Http\Controllers\Bp\SiteController as BpSiteController;
 use App\Http\Controllers\Bp\UserController as BpUserController;
 use App\Http\Controllers\Bp\WholesalePriceController as BpWholesalePriceController;
@@ -47,6 +52,7 @@ use App\Http\Controllers\Customer\InquiryController as CustomerInquiryController
 use App\Http\Controllers\Customer\InvoiceController as CustomerInvoiceController;
 use App\Http\Controllers\Customer\UserController as CustomerUserController;
 use App\Http\Controllers\PostalLookupController;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -78,6 +84,16 @@ foreach (
     ] as $guard => $controllers
 ) {
     Route::prefix($guard)->name("{$guard}.")->group(function () use ($guard, $controllers) {
+        if (in_array($guard, ['admin', 'bp'], true)) {
+            Route::get('/', function () use ($guard) {
+                if (Auth::guard($guard)->check()) {
+                    return redirect()->route("{$guard}.dashboard");
+                }
+
+                return redirect()->route("{$guard}.login");
+            })->name('home');
+        }
+
         Route::middleware("guest.guard:{$guard}")->group(function () use ($controllers) {
             Route::get('login', [$controllers['login'], 'create'])->name('login');
             Route::post('login', [$controllers['login'], 'store'])->name('login.store');
@@ -182,12 +198,17 @@ foreach (
                     Route::post('data-field-names', [DataFieldNameController::class, 'store'])->name('data-field-names.store');
                     Route::put('data-field-names/{dataFieldName}', [DataFieldNameController::class, 'update'])->name('data-field-names.update');
 
+                    Route::get('item-types', [ItemTypeController::class, 'index'])->name('item-types.index');
+                    Route::post('item-types', [ItemTypeController::class, 'store'])->name('item-types.store');
+                    Route::put('item-types/{itemType}', [ItemTypeController::class, 'update'])->name('item-types.update');
+
                     Route::get('contracts', [ContractController::class, 'index'])->name('contracts.index');
                     Route::get('contracts/create', [ContractController::class, 'create'])->name('contracts.create');
                     Route::post('contracts', [ContractController::class, 'store'])->name('contracts.store');
                     Route::get('contracts/{contract}', [ContractController::class, 'show'])->name('contracts.show');
                     Route::delete('contracts/{contract}', [ContractController::class, 'destroy'])->name('contracts.destroy');
                     Route::put('contracts/{contract}/prices', [ContractController::class, 'updatePrices'])->name('contracts.prices');
+                    Route::put('contracts/{contract}/billing', [ContractController::class, 'updateBilling'])->name('contracts.billing');
                     Route::post('contracts/{contract}/submit-approval', [ContractController::class, 'submitApproval'])->name('contracts.submit-approval');
                     Route::post('contracts/{contract}/activate', [ContractController::class, 'activate'])->name('contracts.activate');
                     Route::post('contracts/{contract}/revert-service', [ContractController::class, 'revertService'])->name('contracts.revert-service');
@@ -195,6 +216,7 @@ foreach (
                     Route::get('contracts/{contract}/cancellation-suggestion', [ContractController::class, 'cancellationSuggestion'])->name('contracts.cancellation-suggestion');
                     Route::post('contracts/{contract}/messages', [ContractController::class, 'storeMessage'])->name('contracts.messages.store');
                     Route::post('contracts/{contract}/regenerate-documents', [ContractController::class, 'regenerateDocuments'])->name('contracts.regenerate-documents');
+                    Route::put('contracts/{contract}/data', [ContractController::class, 'upsertContractData'])->name('contracts.data');
                     Route::put('contract-items/{contractItem}/data', [ContractController::class, 'upsertData'])->name('contracts.items.data');
                     Route::get('contract-items/{contractItem}/documents/{document}/download', [ContractController::class, 'downloadDocument'])->name('contracts.items.documents.download');
                     Route::delete('contract-items/{contractItem}/documents/{document}', [ContractController::class, 'destroyDocument'])->name('contracts.items.documents.destroy');
@@ -203,11 +225,17 @@ foreach (
                     Route::post('applications/{application}/decide', [ApplicationController::class, 'decide'])->name('applications.decide');
 
                     Route::get('invoices', [InvoiceController::class, 'index'])->name('invoices.index');
-                    Route::get('invoices/create', [InvoiceController::class, 'create'])->name('invoices.create');
-                    Route::post('invoices', [InvoiceController::class, 'store'])->name('invoices.store');
                     Route::get('invoices/{invoice}', [InvoiceController::class, 'show'])->name('invoices.show');
                     Route::post('invoices/{invoice}/mark-paid', [InvoiceController::class, 'markPaid'])->name('invoices.mark-paid');
                     Route::post('invoices/{invoice}/cancel', [InvoiceController::class, 'cancel'])->name('invoices.cancel');
+                    Route::get('kickbacks', [KickbackInvoiceController::class, 'index'])->name('kickbacks.index');
+                    Route::get('kickbacks/{kickback}', [KickbackInvoiceController::class, 'show'])->name('kickbacks.show');
+                    Route::post('kickbacks/{kickback}/mark-paid', [KickbackInvoiceController::class, 'markPaid'])->name('kickbacks.mark-paid');
+                    Route::post('kickbacks/{kickback}/withdraw', [KickbackInvoiceController::class, 'withdraw'])->name('kickbacks.withdraw');
+                    Route::get('billing-batch', [BillingBatchSettingsController::class, 'edit'])->name('billing-batch.edit');
+                    Route::put('billing-batch', [BillingBatchSettingsController::class, 'update'])->name('billing-batch.update');
+                    Route::post('billing-batch/run', [BillingBatchSettingsController::class, 'run'])->name('billing-batch.run');
+                    Route::get('billing-batch/runs/{run}', [BillingBatchSettingsController::class, 'showRun'])->name('billing-batch.runs.show');
 
                     Route::get('tickets/received', [InquiryController::class, 'received'])->name('tickets.received');
                     Route::get('tickets/{inquiry}/inspect', [InquiryController::class, 'inspect'])->name('tickets.inspect');
@@ -281,12 +309,17 @@ foreach (
                     Route::get('customers/{customer}/prices', [BpCustomerPriceController::class, 'edit'])->name('customers.prices.edit');
                     Route::put('customers/{customer}/prices', [BpCustomerPriceController::class, 'update'])->name('customers.prices.update');
 
+                    Route::get('item-types', [BpItemTypeController::class, 'index'])->name('item-types.index');
+                    Route::post('item-types', [BpItemTypeController::class, 'store'])->name('item-types.store');
+                    Route::put('item-types/{itemType}', [BpItemTypeController::class, 'update'])->name('item-types.update');
+
                     Route::get('contracts', [BpContractController::class, 'index'])->name('contracts.index');
                     Route::get('contracts/create', [BpContractController::class, 'create'])->name('contracts.create');
                     Route::post('contracts', [BpContractController::class, 'store'])->name('contracts.store');
                     Route::get('contracts/{contract}', [BpContractController::class, 'show'])->name('contracts.show');
                     Route::delete('contracts/{contract}', [BpContractController::class, 'destroy'])->name('contracts.destroy');
                     Route::put('contracts/{contract}/prices', [BpContractController::class, 'updatePrices'])->name('contracts.prices');
+                    Route::put('contracts/{contract}/billing', [BpContractController::class, 'updateBilling'])->name('contracts.billing');
                     Route::post('contracts/{contract}/submit-approval', [BpContractController::class, 'submitApproval'])->name('contracts.submit-approval');
                     Route::post('contracts/{contract}/price-change', [BpContractController::class, 'submitPriceChange'])->name('contracts.price-change');
                     Route::post('contracts/{contract}/activate', [BpContractController::class, 'activate'])->name('contracts.activate');
@@ -295,6 +328,7 @@ foreach (
                     Route::get('contracts/{contract}/cancellation-suggestion', [BpContractController::class, 'cancellationSuggestion'])->name('contracts.cancellation-suggestion');
                     Route::post('contracts/{contract}/messages', [BpContractController::class, 'storeMessage'])->name('contracts.messages.store');
                     Route::post('contracts/{contract}/regenerate-documents', [BpContractController::class, 'regenerateDocuments'])->name('contracts.regenerate-documents');
+                    Route::put('contracts/{contract}/data', [BpContractController::class, 'upsertContractData'])->name('contracts.data');
                     Route::put('contract-items/{contractItem}/data', [BpContractController::class, 'upsertData'])->name('contracts.items.data');
                     Route::get('contract-items/{contractItem}/documents/{document}/download', [BpContractController::class, 'downloadDocument'])->name('contracts.items.documents.download');
                     Route::delete('contract-items/{contractItem}/documents/{document}', [BpContractController::class, 'destroyDocument'])->name('contracts.items.documents.destroy');
@@ -303,11 +337,13 @@ foreach (
                     Route::post('applications/{application}/decide', [BpApplicationController::class, 'decide'])->name('applications.decide');
 
                     Route::get('invoices', [BpInvoiceController::class, 'index'])->name('invoices.index');
-                    Route::get('invoices/create', [BpInvoiceController::class, 'create'])->name('invoices.create');
-                    Route::post('invoices', [BpInvoiceController::class, 'store'])->name('invoices.store');
                     Route::get('invoices/{invoice}', [BpInvoiceController::class, 'show'])->name('invoices.show');
                     Route::post('invoices/{invoice}/mark-paid', [BpInvoiceController::class, 'markPaid'])->name('invoices.mark-paid');
                     Route::post('invoices/{invoice}/cancel', [BpInvoiceController::class, 'cancel'])->name('invoices.cancel');
+                    Route::get('kickbacks', [BpKickbackInvoiceController::class, 'index'])->name('kickbacks.index');
+                    Route::get('kickbacks/{kickback}', [BpKickbackInvoiceController::class, 'show'])->name('kickbacks.show');
+                    Route::post('kickbacks/{kickback}/mark-paid', [BpKickbackInvoiceController::class, 'markPaid'])->name('kickbacks.mark-paid');
+                    Route::post('kickbacks/{kickback}/withdraw', [BpKickbackInvoiceController::class, 'withdraw'])->name('kickbacks.withdraw');
 
                     Route::get('tickets/received', [BpInquiryController::class, 'received'])->name('tickets.received');
                     Route::get('tickets/issued', [BpInquiryController::class, 'issued'])->name('tickets.issued');

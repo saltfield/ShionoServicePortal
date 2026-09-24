@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Concerns;
 
 use App\Domains\Auth\Services\PasswordChangeService;
+use App\Domains\Auth\Support\GuardAwareRedirect;
 use App\Http\Requests\Auth\PasswordChangeRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -40,9 +41,10 @@ trait HandlesForcedPasswordChange
         );
 
         if ($wasForced) {
-            return redirect()
-                ->intended(route($this->guardName().'.dashboard'))
-                ->with('status', 'パスワードを変更しました。');
+            return GuardAwareRedirect::intended(
+                $this->guardName(),
+                route($this->guardName().'.dashboard'),
+            )->with('status', 'パスワードを変更しました。');
         }
 
         return redirect()

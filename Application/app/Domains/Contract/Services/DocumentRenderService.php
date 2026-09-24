@@ -45,6 +45,7 @@ class DocumentRenderService
         $line->loadMissing([
             'item',
             'dataRows.dataFieldName',
+            'contract.dataRows.dataFieldName',
             'contract.customer',
             'contract.site',
             'contract.owningBp',
@@ -93,15 +94,27 @@ class DocumentRenderService
             'part_tax' => (string) $partTax,
         ];
 
+        foreach ($contract?->dataRows ?? [] as $row) {
+            $this->applyDataRowToMap($map, $row);
+        }
+
         foreach ($line->dataRows as $row) {
-            $code = $row->replace_code ?: $row->dataFieldName?->replace_code;
-            if (! is_string($code) || $code === '' || ReservedReplaceCodes::isReserved($code)) {
-                continue;
-            }
-            $map[$code] = (string) $row->value;
+            $this->applyDataRowToMap($map, $row);
         }
 
         return $map;
+    }
+
+    /**
+     * @param  array<string, string>  $map
+     */
+    private function applyDataRowToMap(array &$map, object $row): void
+    {
+        $code = $row->replace_code ?: $row->dataFieldName?->replace_code;
+        if (! is_string($code) || $code === '' || ReservedReplaceCodes::isReserved($code)) {
+            return;
+        }
+        $map[$code] = (string) $row->value;
     }
 
     /**

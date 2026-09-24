@@ -222,6 +222,36 @@ class BpHierarchyService
             || $this->isDescendant($ancestor, $possibleDescendant);
     }
 
+    public function rootOf(BusinessPartner $partner): BusinessPartner
+    {
+        $ancestors = $this->ancestors($partner, includeSelf: true);
+
+        return $ancestors->last() ?? $partner;
+    }
+
+    /**
+     * 管理BPからルートまでの親子区間（子→親方向の並びで、seller=親 / buyer=子）。
+     *
+     * @return list<array{seller: BusinessPartner, buyer: BusinessPartner, depth_from_root: int}>
+     */
+    public function wholesaleEdgesFromLeaf(BusinessPartner $leaf): array
+    {
+        $chain = $this->ancestors($leaf, includeSelf: true)->values();
+        // depth_diff ascending: leaf(0), parent(1), ... root(n)
+        $edges = [];
+        for ($i = 0; $i < $chain->count() - 1; $i++) {
+            $buyer = $chain[$i];
+            $seller = $chain[$i + 1];
+            $edges[] = [
+                'seller' => $seller,
+                'buyer' => $buyer,
+                'depth_from_root' => $chain->count() - 2 - $i,
+            ];
+        }
+
+        return $edges;
+    }
+
     /**
      * @return list<int>
      */

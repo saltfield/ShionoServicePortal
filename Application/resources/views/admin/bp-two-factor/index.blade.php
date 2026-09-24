@@ -69,7 +69,7 @@
                                 <select name="two_factor_mode" class="form-select form-select-sm" style="width:auto">
                                     @foreach ($modes as $mode)
                                         <option value="{{ $mode->value }}" @selected($partner->two_factor_mode === $mode)>
-                                            {{ $mode->value }}
+                                            {{ $mode->label() }}
                                         </option>
                                     @endforeach
                                 </select>
@@ -143,7 +143,7 @@
                                     <select name="two_factor_mode" class="form-select form-select-sm" style="width:auto">
                                         @foreach ($modes as $mode)
                                             <option value="{{ $mode->value }}" @selected($customer->two_factor_mode === $mode)>
-                                                {{ $mode->value }}
+                                                {{ $mode->label() }}
                                             </option>
                                         @endforeach
                                     </select>

@@ -37,8 +37,14 @@ erDiagram
 
   inquiries ||--o{ inquiry_messages : "messages"
   announcements ||--o{ announcement_targets : "targets"
-```
 
+  contracts ||--o{ invoices : "billed"
+  invoices ||--o{ invoice_lines : "lines"
+  billing_batch_runs ||--o{ invoices : "created"
+  billing_batch_runs ||--o{ kickback_invoices : "created"
+  billing_batch_runs ||--o{ billing_batch_errors : "errors"
+  contracts ||--o{ kickback_invoices : "kickbacks"
+```
 ---
 
 ## 領域別テーブル一覧
@@ -143,12 +149,14 @@ CHECK:
 | name / description | | |
 | billing_type | ENUM('initial','running') | イニシャル / ランニング |
 | required_item_id | FK items NULL | 必須セット品目（循環禁止） |
-| partition_price | DECIMAL(12,2) | 標準仕切り |
-| recommended_price | DECIMAL(12,2) | 推奨 |
-| user_price | DECIMAL(12,2) | ユーザー向け標準（税別・整数運用） |
+| partition_price | DECIMAL(12,2) | 標準仕切り（卸未設定時のフォールバック） |
+| recommended_price | DECIMAL(12,2) | 推奨価格（参照のみ。計算には使わない） |
+| user_price | DECIMAL(12,2) | ユーザー標準（カスタマー売価の既定・税別整数） |
 | tax_rate | TINYINT | 消費税率％（既定10） |
 | is_active | | |
 | softDeletes | | |
+
+価格の使い分け: [pricing.md](../architecture/pricing.md)
 
 #### `bp_wholesale_prices`
 親BPが **直接の子BP** に設定する卸（仕切り）価格。金額は品目あたり1本。  
@@ -172,7 +180,7 @@ UNIQUE(item_id, bp_id, customer_id)
 | site_id | FK | |
 | customer_id | FK | 冗長保持 |
 | owning_bp_id | FK | 契約管理BP |
-| status | VARCHAR(32) | draft / pending_price_approval / approved / activated / cancelled |
+| status | VARCHAR(32) | draft（表示: オーダー作成中）/ pending_price_approval / approved / activated / cancelled |
 | applied_at / activated_at | | |
 | softDeletes | | |
 
@@ -203,7 +211,10 @@ UNIQUE(item_id, bp_id, customer_id)
 契約データの名称マスタ（管理者管理）。`replace_code`（英小文字＋`_`、一意。予約語不可）。
 
 #### `contract_item_data`
-契約明細ごとの **名称:値**。`data_field_name_id` 任意（マスタ参照）。名称はマスタ外の直接入力も可。マスタ外は `replace_code` 必須。
+契約明細ごとの **名称:値**。`data_field_name_id` 任意（マスタ参照）。名称はマスタ外の直接入力も可。マスタ外は `replace_code` 必須。品目あたり最大10行。
+
+#### `contract_data`
+契約全体の共通 **名称:値**（全品目テンプレに適用）。品目データと同コードの場合は品目側優先。最大10行。
 
 #### `item_documents`
 品目に紐づく **Documentテンプレート**（開通案内・保守・保証書など）。**Excel / XML / HTML のみ・品目あたり最大5**。契約時に置換→PDF化される。
@@ -213,7 +224,7 @@ UNIQUE(item_id, bp_id, customer_id)
 
 ---
 
-### E. 請求（Phase 7 案α）
+### E. 請求（Phase 7 基盤 → Phase 10 拡張）
 
 #### `invoices`
 | カラム | 型 | 備考 |
@@ -221,46 +232,66 @@ UNIQUE(item_id, bp_id, customer_id)
 | id | PK | |
 | code | VARCHAR UNIQUE | `INV{YYYYMM}{seq}` |
 | contract_id / customer_id / owning_bp_id | FK | |
+| issuer_bp_id | FK | ルートBP（発行主体） |
+| source | VARCHAR(16) | 既定 `auto` |
+| billing_batch_run_id | FK NULL | 生成実行 |
 | billing_year_month | CHAR(6) | YYYYMM |
-| status | VARCHAR | issued / paid / cancelled |
-| subtotal / tax_total / total | BIGINT | 円（整数） |
-| issued_at / paid_at / cancelled_at | | |
+| due_year_month | CHAR(6) | 請求月の翌月 |
+| status | VARCHAR | issued / paid / withdrawn |
+| subtotal / tax_total / total | BIGINT | 円（整数・税別／税／税込） |
+| issued_at / paid_at / withdrawn_at | | |
 | softDeletes | | |
 
+金額は契約明細の **`unit_price`（EU単価）**。仕切りはキックバック計算用。
+
 #### `invoice_lines`
-品目明細（イニシャルは開通月のみ、ランニングは指定月）。
+品目明細（イニシャルは開始月＋未請求時のキャッチアップ、ランニングは対象月）。
+
+#### `billing_batch_runs`
+| カラム | 備考 |
+|--------|------|
+| billing_year_month | 対象請求月 |
+| trigger | `manual` / `scheduled` |
+| status | `success` / `partial` / `failed` |
+| actor_user_id | 手動時の実行者 |
+| invoices_count / kickbacks_count / skipped_count / errors_count | |
+| started_at / finished_at | |
+
+#### `billing_batch_errors`
+実行に紐づく契約単位エラー（phase: `customer_invoice` / `kickback`）。
+
+#### `kickback_invoices` / `kickback_invoice_lines`
+BP 間キックバック。`from_bp_id`→`to_bp_id`、`billing_batch_run_id`、ステータスは invoices と同様（issued/paid/withdrawn）。
+
+#### `contract_item_price_layers`
+価格承認時の仕切りスナップショット（seller/buyer/amount/depth_from_root）。
+
+#### `system_settings`
+key-value。自動請求スケジュールは key=`billing_batch_schedule`。
 
 ---
 
-### F. 問い合わせ・お知らせ
+### F. 問い合わせ・お知らせ・チケット
 
-#### `inquiries`
-| カラム | 型 | 備考 |
-|--------|-----|------|
-| id | PK | |
-| subject | VARCHAR | |
-| status | ENUM('open','in_progress','closed') | 再オープン可 |
-| opened_by_user_id | FK users | |
-| customer_id | FK customers NULL | カスタマー起票時 |
-| owning_bp_id | FK business_partners | 対応BP（管理BP） |
-| closed_at | TIMESTAMP NULL | |
-| softDeletes / timestamps | | |
+#### `inquiries`（Phase 9 でチケット化）
+受領／発行・ステータス（起票／取下／対応中／クローズ）・添付。ルート名は `*.tickets.*`。詳細は [phase9-setup.md](../architecture/phase9-setup.md)。
 
 #### `inquiry_messages`
-LINE風チャットの1メッセージ（テキストのみ）。Livewire ポーリング。
+チケットスレッドのメッセージ（テキスト＋任意添付）。
 
 #### `announcements`
 | カラム | 型 | 備考 |
 |--------|-----|------|
 | id | PK | |
 | title / body | | |
-| published_at | TIMESTAMP | |
+| published_at | TIMESTAMP | 即時または予約 |
+| expires_at | TIMESTAMP NULL | |
 | created_by_user_id | FK users | |
 | owning_bp_id | FK NULL | 管理者作成は NULL |
 | softDeletes / timestamps | | |
 
 #### `announcement_targets`
-`target_type`: `all` \| `bp` \| `customer`。`target_id` は all のとき NULL。
+`target_type`: `all` \| `all_bp` \| `all_customer` \| `bp` \| `customer` 等。
 
 #### `announcement_reads`
 ユーザー単位既読（`announcement_id` + `user_id` UNIQUE）。
@@ -272,6 +303,7 @@ LINE風チャットの1メッセージ（テキストのみ）。Livewire ポー
 - すべての FK に INDEX
 - `bp_closure(ancestor_id, depth_diff)` / `(descendant_id)`
 - `contracts(owning_bp_id, status)`, `contracts(customer_id)`
+- `invoices(billing_batch_run_id)`, `invoices(contract_id, billing_year_month)`
 - `inquiries(owning_bp_id, status, updated_at)`
 - 識別子 UNIQUE は bin 照合のカラムで定義
 
@@ -287,5 +319,8 @@ LINE風チャットの1メッセージ（テキストのみ）。Livewire ポー
 | 5 | contracts, applications, PDF関連メタ |
 | 6 | inquiries, announcements |
 | 7 | replace_code, invoices / invoice_lines, BP連絡先 |
+| 8 | （主に権限・UI。スキーマ追加は軽微） |
+| 9 | inquiries 再編（チケット） |
+| 10 | 契約請求フラグ、issuer、kickbacks、system_settings、billing_batch_runs、batch_run_id |
 
-本ドキュメントは論理設計の合意用。カラムの追加微修正は各 Phase 実装前に更新する。
+本ドキュメントは論理設計と実装の対照用。詳細カラムは各 Phase のマイグレーションを正とする。

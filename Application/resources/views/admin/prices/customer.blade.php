@@ -7,10 +7,15 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">カスタマー価格</h1>
-        <a href="{{ route(($routePrefix ?? 'admin').'.customers.show', ['customer' => $customer, 'tab' => 'prices']) }}" class="btn btn-outline-secondary btn-sm">カスタマー詳細へ</a>
-    </div>
+    @php $prefix = $routePrefix ?? 'admin'; @endphp
+    @include('partials.breadcrumb', [
+        'crumbs' => [
+            ['label' => 'カスタマー', 'url' => route($prefix.'.customers.index', ['managing_bp_id' => $customer->managing_bp_id])],
+            ['label' => 'カスタマー詳細', 'url' => route($prefix.'.customers.show', ['customer' => $customer, 'tab' => 'prices'])],
+        ],
+        'current' => 'カスタマー価格',
+    ])
+    <h1 class="h3 mb-3">カスタマー価格</h1>
 
     <p class="text-muted mb-3">
         <code>{{ $customer->code }}</code> / {{ $customer->name }}

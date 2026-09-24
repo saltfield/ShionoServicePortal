@@ -61,10 +61,18 @@ function bpItemsFixture(): array
 it('lets bp create owned service and set wholesale from item show', function () {
     $fx = bpItemsFixture();
 
+    $type = \App\Models\ItemType::query()->create([
+        'name' => 'BP品目種別',
+        'message' => null,
+        'is_active' => true,
+        'owning_bp_id' => null,
+    ]);
+
     $this->actingAs($fx['bpUser'], 'bp')
         ->post(route('bp.items.store'), [
             'name' => '現地サポート',
             'billing_type' => BillingType::Running->value,
+            'item_type_id' => $type->id,
             'partition_price' => 800,
             'recommended_price' => 1200,
             'user_price' => 1500,
@@ -148,4 +156,101 @@ it('rejects other bp owned item in contract draft', function () {
 
     expect(fn () => app(ContractService::class)->createDraft($childUser, $site, [$other->id]))
         ->toThrow(InvalidArgumentException::class, '他BPの独自サービス');
+});
+
+it('shows bp owned item type and item on order create', function () {
+    $fx = bpItemsFixture();
+    $seq = app(NumberSequenceService::class);
+
+    $type = \App\Models\ItemType::query()->create([
+        'name' => '自社回線',
+        'message' => '独自案内',
+        'is_active' => true,
+        'owning_bp_id' => $fx['root']->id,
+    ]);
+    $owned = app(CatalogPricingService::class)->createItem($fx['bpUser'], [
+        'name' => '現地サポート',
+        'billing_type' => BillingType::Running->value,
+        'item_type_id' => $type->id,
+        'partition_price' => 800,
+        'user_price' => 1500,
+        'owning_bp_id' => $fx['root']->id,
+    ]);
+
+    $customer = Customer::query()->create([
+        'code' => $seq->next(PartnerCodePrefix::Cn),
+        'managing_bp_id' => $fx['root']->id,
+        'name' => 'RootCust',
+        'entity_type' => 'corporate',
+        'two_factor_mode' => 'optional',
+        'is_active' => true,
+    ]);
+    $site = Site::query()->create([
+        'customer_id' => $customer->id,
+        'name' => '本社',
+        'billing_name' => '請求先',
+        'billing_address' => '東京都',
+        'is_primary' => true,
+        'is_active' => true,
+    ]);
+
+    $this->actingAs($fx['bpUser'], 'bp')
+        ->get(route('bp.contracts.create', [
+            'customer_id' => $customer->id,
+            'site_id' => $site->id,
+        ]))
+        ->assertOk()
+        ->assertSee('自社回線')
+        ->assertSee('現地サポート')
+        ->assertSee($owned->code)
+        ->assertSee('BP独自');
+});
+
+it('lets parent bp use own item for descendant customer order', function () {
+    $fx = bpItemsFixture();
+    $seq = app(NumberSequenceService::class);
+
+    $type = \App\Models\ItemType::query()->create([
+        'name' => '親独自種別',
+        'is_active' => true,
+        'owning_bp_id' => $fx['root']->id,
+    ]);
+    $owned = app(CatalogPricingService::class)->createItem($fx['bpUser'], [
+        'name' => '親独自品目',
+        'billing_type' => BillingType::Initial->value,
+        'item_type_id' => $type->id,
+        'partition_price' => 100,
+        'user_price' => 200,
+        'owning_bp_id' => $fx['root']->id,
+    ]);
+
+    $customer = Customer::query()->create([
+        'code' => $seq->next(PartnerCodePrefix::Cn),
+        'managing_bp_id' => $fx['child']->id,
+        'name' => 'ChildCust2',
+        'entity_type' => 'corporate',
+        'two_factor_mode' => 'optional',
+        'is_active' => true,
+    ]);
+    $site = Site::query()->create([
+        'customer_id' => $customer->id,
+        'name' => '本社',
+        'billing_name' => '請求先',
+        'billing_address' => '東京都',
+        'is_primary' => true,
+        'is_active' => true,
+    ]);
+
+    $this->actingAs($fx['bpUser'], 'bp')
+        ->get(route('bp.contracts.create', [
+            'customer_id' => $customer->id,
+            'site_id' => $site->id,
+        ]))
+        ->assertOk()
+        ->assertSee('親独自種別')
+        ->assertSee('親独自品目');
+
+    $contract = app(ContractService::class)->createDraft($fx['bpUser'], $site, [$owned->id]);
+    expect($contract->items)->toHaveCount(1)
+        ->and((int) $contract->items->first()->item_id)->toBe((int) $owned->id);
 });

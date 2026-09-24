@@ -30,7 +30,7 @@ class InvoiceController extends Controller
         $billing->assertVisible($actor, $invoice);
 
         return view('admin.invoices.show', [
-            'invoice' => $invoice->load(['lines', 'customer', 'owningBp', 'contract']),
+            'invoice' => $invoice->load(['lines', 'customer', 'owningBp', 'issuerBp', 'contract']),
             'routePrefix' => 'customer',
             'canManage' => false,
         ]);

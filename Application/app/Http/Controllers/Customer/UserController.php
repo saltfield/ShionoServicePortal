@@ -133,7 +133,7 @@ class UserController extends Controller
 
         $validated = $request->validate($rules);
         $validated['is_active'] = $request->boolean('is_active', true);
-        $validated['must_change_password'] = $request->boolean('must_change_password', $creating);
+        $validated['must_change_password'] = $request->boolean('must_change_password');
         if ($creating) {
             $validated['login_id'] = IdentifierNormalizer::normalize($validated['login_id']);
         }

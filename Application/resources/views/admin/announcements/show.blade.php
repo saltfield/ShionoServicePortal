@@ -7,19 +7,16 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
-    <nav aria-label="breadcrumb">
-        <ol class="breadcrumb small mb-2">
-            <li class="breadcrumb-item"><a href="{{ route(($routePrefix ?? 'admin').'.announcements.index') }}">お知らせ</a></li>
-            <li class="breadcrumb-item active" aria-current="page">お知らせ詳細</li>
-        </ol>
-    </nav>
+    @include('partials.breadcrumb', [
+        'crumbs' => [['label' => 'お知らせ', 'url' => route(($routePrefix ?? 'admin').'.announcements.index')]],
+        'current' => 'お知らせ詳細',
+    ])
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h3 mb-0">{{ $announcement->title }}</h1>
         <div class="d-flex gap-2">
             @if ($canManage ?? false)
                 <a href="{{ route(($routePrefix ?? 'admin').'.announcements.edit', $announcement) }}" class="btn btn-primary btn-sm">編集</a>
             @endif
-            <a href="{{ route(($routePrefix ?? 'admin').'.announcements.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
         </div>
     </div>
     @if (session('status'))

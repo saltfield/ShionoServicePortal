@@ -12,11 +12,13 @@ use App\Domains\Contract\Enums\ContractStatus;
 use App\Domains\Iam\Services\AuditLogger;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Models\Contract;
+use App\Models\ContractItem;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\User;
 use App\Support\TaxPrice;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -31,14 +33,14 @@ class BillingService
 
     public function visibleQuery(User $actor): Builder
     {
-        $query = Invoice::query()->with(['customer', 'owningBp', 'contract']);
+        $query = Invoice::query()->with(['customer', 'owningBp', 'issuerBp', 'contract']);
 
         return match ($actor->user_type) {
             UserType::Admin => $query,
-            UserType::Bp => $query->whereIn(
-                'owning_bp_id',
-                $this->hierarchy->descendantIdsIncludingSelf($actor->businessPartner)
-            ),
+            UserType::Bp => $query->where(function ($q) use ($actor) {
+                $ids = $this->hierarchy->descendantIdsIncludingSelf($actor->businessPartner);
+                $q->whereIn('owning_bp_id', $ids)->orWhereIn('issuer_bp_id', $ids);
+            }),
             UserType::Customer => $query->where('customer_id', $actor->customer_id),
         };
     }
@@ -57,6 +59,14 @@ class BillingService
         ]);
         $this->assertCanManageContract($actor, $contract);
 
+        return $this->generateForContract($contract, $billingYearMonth, $actor, $note);
+    }
+
+    /**
+     * バッチ／システム生成（認可チェックなし）。
+     */
+    public function generateForContract(Contract $contract, string $billingYearMonth, ?User $actor = null, ?string $note = null, ?int $billingBatchRunId = null): ?Invoice
+    {
         if ($contract->status !== ContractStatus::Activated) {
             throw new InvalidArgumentException('サービス提供開始の契約のみ請求を発行できます。');
         }
@@ -65,62 +75,59 @@ class BillingService
             throw new InvalidArgumentException('請求月は YYYYMM 形式で指定してください。');
         }
 
-        $contract->loadMissing(['items.item', 'customer', 'owningBp']);
+        if (! $contract->auto_invoice_enabled) {
+            return null;
+        }
+
+        if ($contract->billing_suspended) {
+            return null;
+        }
+
+        if ($contract->end_user_billing_disabled) {
+            return null;
+        }
+
+        $first = $contract->first_billing_year_month;
+        $final = $contract->final_billing_year_month;
+        if ($first && $billingYearMonth < $first) {
+            return null;
+        }
+        if ($final && $billingYearMonth > $final) {
+            return null;
+        }
 
         if (Invoice::query()
             ->where('contract_id', $contract->id)
             ->where('billing_year_month', $billingYearMonth)
-            ->where('status', '!=', InvoiceStatus::Cancelled->value)
+            ->where('status', '!=', InvoiceStatus::Withdrawn->value)
             ->exists()) {
             throw new InvalidArgumentException('この契約・請求月の請求は既に発行されています。');
         }
 
-        $activatedYm = $contract->first_billing_year_month
-            ?: optional($contract->activated_at)->timezone(config('app.timezone'))->format('Ym');
-        $lines = [];
-        $sort = 0;
-
-        foreach ($contract->items as $line) {
-            $type = $line->item?->billing_type;
-            if ($type === BillingType::Initial && $activatedYm !== $billingYearMonth) {
-                continue;
-            }
-            if ($type === BillingType::Running || ($type === BillingType::Initial && $activatedYm === $billingYearMonth)) {
-                $unit = (int) $line->unit_price;
-                $rate = (int) ($line->tax_rate ?? 10);
-                $inclusive = TaxPrice::inclusive($unit, $rate);
-                $tax = $inclusive - $unit;
-                $lines[] = [
-                    'contract_item_id' => $line->id,
-                    'item_id' => $line->item_id,
-                    'description' => trim(($line->item?->code ?? '').' / '.($line->item?->name ?? '品目')),
-                    'billing_type' => $type->value,
-                    'quantity' => 1,
-                    'unit_price' => $unit,
-                    'tax_rate' => $rate,
-                    'amount' => $unit,
-                    'tax_amount' => $tax,
-                    'amount_inclusive' => $inclusive,
-                    'sort_order' => $sort++,
-                ];
-            }
-        }
+        $contract->loadMissing(['items.item', 'customer', 'owningBp']);
+        $issuer = $this->hierarchy->rootOf($contract->owningBp);
+        $lines = $this->buildCustomerLines($contract, $billingYearMonth);
 
         if ($lines === []) {
-            throw new InvalidArgumentException('この請求月に計上できる品目がありません。');
+            return null;
         }
 
         $subtotal = array_sum(array_column($lines, 'amount'));
         $taxTotal = array_sum(array_column($lines, 'tax_amount'));
         $total = array_sum(array_column($lines, 'amount_inclusive'));
+        $due = Carbon::createFromFormat('Ym', $billingYearMonth)->addMonthNoOverflow()->format('Ym');
 
-        return DB::transaction(function () use ($actor, $contract, $billingYearMonth, $note, $lines, $subtotal, $taxTotal, $total) {
+        return DB::transaction(function () use ($actor, $contract, $issuer, $billingYearMonth, $due, $note, $lines, $subtotal, $taxTotal, $total, $billingBatchRunId) {
             $invoice = Invoice::query()->create([
                 'code' => $this->sequences->next(PartnerCodePrefix::Invoice),
                 'contract_id' => $contract->id,
                 'customer_id' => $contract->customer_id,
                 'owning_bp_id' => $contract->owning_bp_id,
+                'issuer_bp_id' => $issuer->id,
+                'source' => 'auto',
+                'billing_batch_run_id' => $billingBatchRunId,
                 'billing_year_month' => $billingYearMonth,
+                'due_year_month' => $due,
                 'status' => InvoiceStatus::Issued,
                 'subtotal' => $subtotal,
                 'tax_total' => $taxTotal,
@@ -133,20 +140,23 @@ class BillingService
                 InvoiceLine::query()->create(['invoice_id' => $invoice->id, ...$row]);
             }
 
-            $this->auditLogger->log(
-                'billing',
-                'invoice.issue',
-                'success',
-                $actor,
-                targetType: Invoice::class,
-                targetId: $invoice->id,
-                meta: [
-                    'code' => $invoice->code,
-                    'contract_id' => $contract->id,
-                    'billing_year_month' => $billingYearMonth,
-                    'total' => $total,
-                ],
-            );
+            if ($actor) {
+                $this->auditLogger->log(
+                    'billing',
+                    'invoice.issue',
+                    'success',
+                    $actor,
+                    targetType: Invoice::class,
+                    targetId: $invoice->id,
+                    meta: [
+                        'code' => $invoice->code,
+                        'contract_id' => $contract->id,
+                        'billing_year_month' => $billingYearMonth,
+                        'total' => $total,
+                        'billing_batch_run_id' => $billingBatchRunId,
+                    ],
+                );
+            }
 
             return $invoice->load('lines');
         });
@@ -177,25 +187,25 @@ class BillingService
         return $invoice->fresh();
     }
 
-    public function cancel(User $actor, Invoice $invoice): Invoice
+    public function withdraw(User $actor, Invoice $invoice): Invoice
     {
         $this->assertCanManageInvoice($actor, $invoice);
 
-        if ($invoice->status === InvoiceStatus::Cancelled) {
-            throw new InvalidArgumentException('既に取消済みです。');
+        if ($invoice->status === InvoiceStatus::Withdrawn) {
+            throw new InvalidArgumentException('既に取下げ済みです。');
         }
 
         if ($invoice->status === InvoiceStatus::Paid) {
-            throw new InvalidArgumentException('入金済の請求は取消できません。');
+            throw new InvalidArgumentException('入金済の請求は取下げできません。');
         }
 
-        $invoice->status = InvoiceStatus::Cancelled;
-        $invoice->cancelled_at = now();
+        $invoice->status = InvoiceStatus::Withdrawn;
+        $invoice->withdrawn_at = now();
         $invoice->save();
 
         $this->auditLogger->log(
             'billing',
-            'invoice.cancel',
+            'invoice.withdraw',
             'success',
             $actor,
             targetType: Invoice::class,
@@ -204,6 +214,98 @@ class BillingService
         );
 
         return $invoice->fresh();
+    }
+
+    /** @deprecated use withdraw() */
+    public function cancel(User $actor, Invoice $invoice): Invoice
+    {
+        return $this->withdraw($actor, $invoice);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function buildCustomerLines(Contract $contract, string $billingYearMonth): array
+    {
+        $firstYm = $contract->first_billing_year_month
+            ?: optional($contract->activated_at)->timezone(config('app.timezone'))->format('Ym');
+        $lines = [];
+        $sort = 0;
+
+        foreach ($contract->items as $line) {
+            if (! $this->shouldIncludeCustomerLine($line, $billingYearMonth, $firstYm)) {
+                continue;
+            }
+
+            $type = $line->item?->billing_type;
+            $unit = (int) $line->unit_price;
+            $rate = (int) ($line->tax_rate ?? 10);
+            $inclusive = TaxPrice::inclusive($unit, $rate);
+            $tax = $inclusive - $unit;
+            $lines[] = [
+                'contract_item_id' => $line->id,
+                'item_id' => $line->item_id,
+                'description' => trim(($line->item?->code ?? '').' / '.($line->item?->name ?? '品目')),
+                'billing_type' => $type?->value ?? 'running',
+                'quantity' => 1,
+                'unit_price' => $unit,
+                'tax_rate' => $rate,
+                'amount' => $unit,
+                'tax_amount' => $tax,
+                'amount_inclusive' => $inclusive,
+                'sort_order' => $sort++,
+            ];
+        }
+
+        return $lines;
+    }
+
+    private function shouldIncludeCustomerLine(ContractItem $line, string $billingYearMonth, ?string $firstYm): bool
+    {
+        $line->loadMissing(['item', 'contract']);
+
+        if ($line->effectiveEndUserBillingDisabled()) {
+            return false;
+        }
+
+        $type = $line->item?->billing_type;
+        if ($type === BillingType::Initial) {
+            if (! $line->effectiveBillInitialInSystem()) {
+                return false;
+            }
+
+            if ($firstYm === null) {
+                return false;
+            }
+
+            if ($billingYearMonth === $firstYm) {
+                return true;
+            }
+
+            // 開始月のバッチを逃した場合、未請求のイニシャルのみ後続月でキャッチアップ
+            if ($billingYearMonth > $firstYm) {
+                return ! $this->hasIssuedInitialLine($line);
+            }
+
+            return false;
+        }
+
+        if ($type === BillingType::Running) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function hasIssuedInitialLine(ContractItem $line): bool
+    {
+        return InvoiceLine::query()
+            ->where('contract_item_id', $line->id)
+            ->where('billing_type', BillingType::Initial->value)
+            ->whereHas('invoice', function (Builder $query): void {
+                $query->where('status', '!=', InvoiceStatus::Withdrawn->value);
+            })
+            ->exists();
     }
 
     private function assertCanManageInvoice(User $actor, Invoice $invoice): void

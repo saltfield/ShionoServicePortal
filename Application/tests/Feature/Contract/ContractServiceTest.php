@@ -84,6 +84,18 @@ function contractFixture(): array
     return compact('parent', 'child', 'customer', 'site', 'admin', 'bpUser', 'parentUser', 'initial', 'running');
 }
 
+it('shows order-not-submitted warning on overview for draft contracts', function () {
+    $fx = contractFixture();
+    $service = app(ContractService::class);
+    $contract = $service->createDraft($fx['bpUser'], $fx['site'], [$fx['initial']->id, $fx['running']->id]);
+
+    $this->actingAs($fx['admin'], 'admin')
+        ->get(route('admin.contracts.show', ['contract' => $contract, 'tab' => 'overview']))
+        ->assertOk()
+        ->assertSee('オーダー作成中')
+        ->assertSee('このオーダーはまだ申請されていません');
+});
+
 it('creates draft with required items and parent wholesale partition', function () {
     $fx = contractFixture();
     $service = app(ContractService::class);
@@ -99,8 +111,100 @@ it('creates draft with required items and parent wholesale partition', function 
 
     $runningLine = $contract->items->firstWhere('item_id', $fx['running']->id);
     expect($runningLine->partition_price)->toBe(1800)
+        ->and($runningLine->standard_partition_price)->toBe(1800)
         ->and($runningLine->unit_price)->toBe(4000)
-        ->and($runningLine->price_locked)->toBeFalse();
+        ->and($runningLine->price_locked)->toBeFalse()
+        ->and($contract->special_price_requested)->toBeFalse();
+});
+
+it('creates special price request with hope partitions and auto-submits approval', function () {
+    $fx = contractFixture();
+    $service = app(ContractService::class);
+
+    expect(fn () => $service->createDraft($fx['bpUser'], $fx['site'], [$fx['initial']->id, $fx['running']->id], [
+        'special_price_requested' => true,
+        'special_price_reason' => '',
+        'partitions' => [
+            $fx['initial']->id => 900,
+            $fx['running']->id => 1500,
+        ],
+    ]))->toThrow(InvalidArgumentException::class, '特価申請理由');
+
+    $contract = $service->createDraft($fx['bpUser'], $fx['site'], [$fx['initial']->id, $fx['running']->id], [
+        'special_price_requested' => true,
+        'special_price_reason' => '大口案件のため希望仕切りを申請',
+        'partitions' => [
+            $fx['initial']->id => 900,
+            $fx['running']->id => 1500,
+        ],
+        'unit_prices' => [
+            $fx['initial']->id => 4200,
+            $fx['running']->id => 3500,
+        ],
+    ]);
+
+    expect($contract->special_price_requested)->toBeTrue()
+        ->and($contract->special_price_reason)->toBe('大口案件のため希望仕切りを申請')
+        ->and($contract->status)->toBe(ContractStatus::PendingPriceApproval);
+
+    $runningLine = $contract->items->firstWhere('item_id', $fx['running']->id);
+    expect($runningLine->partition_price)->toBe(1500)
+        ->and($runningLine->standard_partition_price)->toBe(1800)
+        ->and($runningLine->unit_price)->toBe(3500)
+        ->and($runningLine->partitionDiffFromStandard())->toBe(300);
+
+    $application = $contract->applications()->latest('id')->first();
+    expect($application)->not->toBeNull()
+        ->and($application->status)->toBe(ApplicationStatus::Pending)
+        ->and($application->payload_json['special_price'])->toBeTrue()
+        ->and($application->payload_json['special_price_reason'])->toBe('大口案件のため希望仕切りを申請');
+
+    $this->actingAs($fx['parentUser'], 'bp')
+        ->get(route('bp.contracts.show', ['contract' => $contract, 'tab' => 'overview']))
+        ->assertOk()
+        ->assertSee('あなたの承認が必要な申請があります')
+        ->assertSee('特価申請あり')
+        ->assertSee('明細・価格');
+
+    $this->actingAs($fx['parentUser'], 'bp')
+        ->get(route('bp.contracts.show', ['contract' => $contract, 'tab' => 'items']))
+        ->assertOk()
+        ->assertSee('特価申請あり')
+        ->assertSee('大口案件のため希望仕切りを申請')
+        ->assertSee('▲')
+        ->assertSee('300')
+        ->assertDontSee('円安い')
+        ->assertDontSee('円高い');
+});
+
+it('requires special price request to change draft partition', function () {
+    $fx = contractFixture();
+    $service = app(ContractService::class);
+    $contract = $service->createDraft($fx['bpUser'], $fx['site'], [$fx['initial']->id, $fx['running']->id]);
+    $lineId = $contract->items->firstWhere('item_id', $fx['running']->id)->id;
+
+    expect(fn () => $service->updateDraftPrices($fx['bpUser'], $contract, [
+        $lineId => ['partition_price' => 1500],
+    ]))->toThrow(InvalidArgumentException::class, '特価申請が必要');
+
+    $service->updateDraftPrices($fx['bpUser'], $contract, [
+        $lineId => ['unit_price' => 4200],
+    ]);
+    expect((int) $contract->fresh()->items->firstWhere('id', $lineId)->unit_price)->toBe(4200)
+        ->and($contract->fresh()->special_price_requested)->toBeFalse();
+
+    $service->updateDraftPrices($fx['bpUser'], $contract->fresh(), [
+        $lineId => ['partition_price' => 1500, 'unit_price' => 4200],
+    ], [
+        'special_price_requested' => true,
+        'special_price_reason' => 'キャンペーン対応',
+    ]);
+
+    $fresh = $contract->fresh();
+    $line = $fresh->items->firstWhere('id', $lineId);
+    expect($fresh->special_price_requested)->toBeTrue()
+        ->and($fresh->special_price_reason)->toBe('キャンペーン対応')
+        ->and((int) $line->partition_price)->toBe(1500);
 });
 
 it('submits price approval and locks after parent approves', function () {
@@ -110,17 +214,205 @@ it('submits price approval and locks after parent approves', function () {
 
     $service->updateDraftPrices($fx['bpUser'], $contract, [
         $contract->items->first()->id => ['partition_price' => 1900],
+    ], [
+        'special_price_requested' => true,
+        'special_price_reason' => '価格調整のため',
     ]);
+
+    expect($contract->fresh()->special_price_requested)->toBeTrue();
 
     $application = $service->submitPriceApproval($fx['bpUser'], $contract->fresh());
     expect($application->status)->toBe(ApplicationStatus::Pending)
-        ->and($contract->fresh()->status)->toBe(ContractStatus::PendingPriceApproval);
+        ->and($contract->fresh()->status)->toBe(ContractStatus::PendingPriceApproval)
+        ->and($application->approvalProgressLabel())->toBe('1/1');
 
     $service->decidePriceApproval($fx['parentUser'], $application, true);
     $contract->refresh();
 
     expect($contract->status)->toBe(ContractStatus::Approved)
         ->and($contract->items->every(fn ($line) => $line->price_locked))->toBeTrue();
+});
+
+it('chains catalog item price approval up to root bp', function () {
+    $seq = app(NumberSequenceService::class);
+    $hierarchy = app(BpHierarchyService::class);
+    $bp1 = $hierarchy->createRoot($seq->next(PartnerCodePrefix::Bpn), 'BP1');
+    $bp2 = $hierarchy->createChild($bp1, $seq->next(PartnerCodePrefix::Bpn), 'BP2');
+    $bp3 = $hierarchy->createChild($bp2, $seq->next(PartnerCodePrefix::Bpn), 'BP3');
+
+    $customer = Customer::query()->create([
+        'code' => $seq->next(PartnerCodePrefix::Cn),
+        'managing_bp_id' => $bp3->id,
+        'name' => 'Chain Customer',
+        'entity_type' => 'corporate',
+        'two_factor_mode' => TwoFactorMode::Optional,
+        'is_active' => true,
+    ]);
+    $site = Site::query()->create([
+        'customer_id' => $customer->id,
+        'name' => '本社',
+        'billing_name' => '請求先',
+        'billing_address' => '東京都',
+        'is_primary' => true,
+        'is_active' => true,
+    ]);
+
+    $admin = User::factory()->admin()->create(['login_id' => 'CHAINADMIN', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($admin, 'system_admin', RoleScope::System);
+    $bp3User = User::factory()->bp($bp3)->create(['login_id' => 'CHAINBP3', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($bp3User, 'bp_owner', RoleScope::Bp, $bp3->id);
+    $bp2User = User::factory()->bp($bp2)->create(['login_id' => 'CHAINBP2', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($bp2User, 'bp_owner', RoleScope::Bp, $bp2->id);
+    $bp1User = User::factory()->bp($bp1)->create(['login_id' => 'CHAINBP1', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($bp1User, 'bp_owner', RoleScope::Bp, $bp1->id);
+
+    $item = app(CatalogPricingService::class)->createItem($admin, [
+        'name' => '連鎖承認品目',
+        'billing_type' => BillingType::Running->value,
+        'partition_price' => 1000,
+        'user_price' => 2000,
+    ]);
+
+    $service = app(ContractService::class);
+    $contract = $service->createDraft($bp3User, $site, [$item->id]);
+    $step1 = $service->submitPriceApproval($bp3User, $contract->fresh());
+
+    expect($step1->to_bp_id)->toBe($bp2->id)
+        ->and($step1->approvalProgressLabel())->toBe('1/2')
+        ->and($step1->payload_json['chain']['required'])->toBeTrue();
+
+    $this->actingAs($bp2User, 'bp')
+        ->get(route('bp.contracts.show', ['contract' => $contract, 'tab' => 'items']))
+        ->assertOk()
+        ->assertSee('承認 1/2')
+        ->assertSee('残り 2 段階');
+
+    $step2 = $service->decidePriceApproval($bp2User, $step1, true);
+    expect($contract->fresh()->status)->toBe(ContractStatus::PendingPriceApproval)
+        ->and($step2->status)->toBe(ApplicationStatus::Pending)
+        ->and($step2->to_bp_id)->toBe($bp1->id)
+        ->and($step2->approvalProgressLabel())->toBe('2/2')
+        ->and($contract->fresh()->items->every(fn ($line) => $line->price_locked))->toBeFalse();
+
+    $this->actingAs($bp1User, 'bp')
+        ->get(route('bp.applications.index'))
+        ->assertOk()
+        ->assertSee('2/2');
+
+    $service->decidePriceApproval($bp1User, $step2, true);
+    expect($contract->fresh()->status)->toBe(ContractStatus::Approved)
+        ->and($contract->fresh()->items->every(fn ($line) => $line->price_locked))->toBeTrue();
+});
+
+it('resumes chain approval at the rejecting bp on resubmit', function () {
+    $seq = app(NumberSequenceService::class);
+    $hierarchy = app(BpHierarchyService::class);
+    $bp1 = $hierarchy->createRoot($seq->next(PartnerCodePrefix::Bpn), 'ResumeBP1');
+    $bp2 = $hierarchy->createChild($bp1, $seq->next(PartnerCodePrefix::Bpn), 'ResumeBP2');
+    $bp3 = $hierarchy->createChild($bp2, $seq->next(PartnerCodePrefix::Bpn), 'ResumeBP3');
+
+    $customer = Customer::query()->create([
+        'code' => $seq->next(PartnerCodePrefix::Cn),
+        'managing_bp_id' => $bp3->id,
+        'name' => 'Resume Customer',
+        'entity_type' => 'corporate',
+        'two_factor_mode' => TwoFactorMode::Optional,
+        'is_active' => true,
+    ]);
+    $site = Site::query()->create([
+        'customer_id' => $customer->id,
+        'name' => '本社',
+        'billing_name' => '請求先',
+        'billing_address' => '東京都',
+        'is_primary' => true,
+        'is_active' => true,
+    ]);
+
+    $admin = User::factory()->admin()->create(['login_id' => 'RESUMEADMIN', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($admin, 'system_admin', RoleScope::System);
+    $bp3User = User::factory()->bp($bp3)->create(['login_id' => 'RESUMEBP3', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($bp3User, 'bp_owner', RoleScope::Bp, $bp3->id);
+    $bp2User = User::factory()->bp($bp2)->create(['login_id' => 'RESUMEBP2', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($bp2User, 'bp_owner', RoleScope::Bp, $bp2->id);
+    $bp1User = User::factory()->bp($bp1)->create(['login_id' => 'RESUMEBP1', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($bp1User, 'bp_owner', RoleScope::Bp, $bp1->id);
+
+    $item = app(CatalogPricingService::class)->createItem($admin, [
+        'name' => '再申請品目',
+        'billing_type' => BillingType::Running->value,
+        'partition_price' => 1000,
+        'user_price' => 2000,
+    ]);
+
+    $service = app(ContractService::class);
+    $contract = $service->createDraft($bp3User, $site, [$item->id]);
+    $step1 = $service->submitPriceApproval($bp3User, $contract->fresh());
+    $step2 = $service->decidePriceApproval($bp2User, $step1, true);
+    $service->decidePriceApproval($bp1User, $step2, false, '条件不足');
+
+    expect($contract->fresh()->status)->toBe(ContractStatus::Draft);
+
+    $resubmitted = $service->submitPriceApproval($bp3User, $contract->fresh());
+    expect($resubmitted->to_bp_id)->toBe($bp1->id)
+        ->and($resubmitted->approvalProgressLabel())->toBe('2/2')
+        ->and($contract->fresh()->status)->toBe(ContractStatus::PendingPriceApproval);
+
+    $this->actingAs($bp1User, 'bp')
+        ->get(route('bp.contracts.show', ['contract' => $contract, 'tab' => 'items']))
+        ->assertOk()
+        ->assertSee('承認')
+        ->assertSee('2/2');
+
+    $service->decidePriceApproval($bp1User, $resubmitted, true);
+    expect($contract->fresh()->status)->toBe(ContractStatus::Approved);
+});
+
+it('finalizes immediately for bp-owned items without root chain', function () {
+    $seq = app(NumberSequenceService::class);
+    $hierarchy = app(BpHierarchyService::class);
+    $bp1 = $hierarchy->createRoot($seq->next(PartnerCodePrefix::Bpn), 'OwnRoot');
+    $bp2 = $hierarchy->createChild($bp1, $seq->next(PartnerCodePrefix::Bpn), 'OwnMid');
+    $bp3 = $hierarchy->createChild($bp2, $seq->next(PartnerCodePrefix::Bpn), 'OwnLeaf');
+
+    $customer = Customer::query()->create([
+        'code' => $seq->next(PartnerCodePrefix::Cn),
+        'managing_bp_id' => $bp3->id,
+        'name' => 'Owned Item Customer',
+        'entity_type' => 'corporate',
+        'two_factor_mode' => TwoFactorMode::Optional,
+        'is_active' => true,
+    ]);
+    $site = Site::query()->create([
+        'customer_id' => $customer->id,
+        'name' => '本社',
+        'billing_name' => '請求先',
+        'billing_address' => '東京都',
+        'is_primary' => true,
+        'is_active' => true,
+    ]);
+
+    $bp3User = User::factory()->bp($bp3)->create(['login_id' => 'OWNBP3', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($bp3User, 'bp_owner', RoleScope::Bp, $bp3->id);
+    $bp2User = User::factory()->bp($bp2)->create(['login_id' => 'OWNBP2', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($bp2User, 'bp_owner', RoleScope::Bp, $bp2->id);
+
+    $item = app(CatalogPricingService::class)->createItem($bp3User, [
+        'name' => 'BP独自品目',
+        'billing_type' => BillingType::Running->value,
+        'partition_price' => 800,
+        'user_price' => 1500,
+        'owning_bp_id' => $bp3->id,
+    ]);
+
+    $service = app(ContractService::class);
+    $contract = $service->createDraft($bp3User, $site, [$item->id]);
+    $app = $service->submitPriceApproval($bp3User, $contract->fresh());
+
+    expect($app->payload_json['chain']['required'])->toBeFalse()
+        ->and($app->approvalProgressLabel())->toBeNull();
+
+    $service->decidePriceApproval($bp2User, $app, true);
+    expect($contract->fresh()->status)->toBe(ContractStatus::Approved);
 });
 
 it('allows price change application after lock', function () {
@@ -153,7 +445,7 @@ it('stores contract item data with master or free name', function () {
     $service->decidePriceApproval($fx['parentUser'], $app, true);
 
     $master = \App\Models\DataFieldName::query()->create([
-        'name' => '回線番号',
+        'name' => 'テスト回線',
         'replace_code' => 'line_id',
         'is_active' => true,
     ]);
@@ -166,11 +458,52 @@ it('stores contract item data with master or free name', function () {
 
     $rows = $line->fresh()->dataRows;
     expect($rows)->toHaveCount(2)
-        ->and($rows[0]->name)->toBe('回線番号')
+        ->and($rows[0]->name)->toBe('テスト回線')
         ->and($rows[0]->replace_code)->toBe('line_id')
         ->and($rows[0]->value)->toBe('03-1234-5678')
         ->and($rows[1]->name)->toBe('設置場所メモ')
         ->and($rows[1]->replace_code)->toBe('install_memo');
+});
+
+it('rejects more than 10 item data rows', function () {
+    $fx = contractFixture();
+    $service = app(ContractService::class);
+    $contract = $service->createDraft($fx['bpUser'], $fx['site'], [$fx['initial']->id, $fx['running']->id]);
+    $app = $service->submitPriceApproval($fx['bpUser'], $contract);
+    $service->decidePriceApproval($fx['parentUser'], $app, true);
+    $line = $contract->fresh()->items->first();
+
+    $rows = [];
+    for ($i = 1; $i <= 11; $i++) {
+        $rows[] = ['name' => "項目{$i}", 'replace_code' => "field_{$i}", 'value' => "v{$i}"];
+    }
+
+    expect(fn () => $service->upsertItemData($fx['bpUser'], $line, $rows))
+        ->toThrow(InvalidArgumentException::class, 'データは最大10行までです。');
+});
+
+it('stores contract common data and lets item data override same replace code', function () {
+    $fx = contractFixture();
+    $service = app(ContractService::class);
+    $contract = $service->createDraft($fx['bpUser'], $fx['site'], [$fx['initial']->id, $fx['running']->id]);
+    $app = $service->submitPriceApproval($fx['bpUser'], $contract);
+    $service->decidePriceApproval($fx['parentUser'], $app, true);
+
+    $service->upsertContractData($fx['bpUser'], $contract->fresh(), [
+        ['name' => '拠点メモ', 'replace_code' => 'site_memo', 'value' => '共通メモ'],
+        ['name' => '回線番号', 'replace_code' => 'caf_cop', 'value' => 'COMMON-LINE'],
+    ]);
+
+    $line = $contract->fresh()->items->first();
+    $service->upsertItemData($fx['bpUser'], $line, [
+        ['name' => '回線番号', 'replace_code' => 'caf_cop', 'value' => 'ITEM-LINE'],
+    ]);
+
+    expect($contract->fresh()->dataRows)->toHaveCount(2);
+
+    $map = app(\App\Domains\Contract\Services\DocumentRenderService::class)->buildReplaceMap($line->fresh(['dataRows', 'contract.dataRows']));
+    expect($map['site_memo'])->toBe('共通メモ')
+        ->and($map['caf_cop'])->toBe('ITEM-LINE');
 });
 
 it('deletes draft contracts only', function () {
@@ -186,7 +519,7 @@ it('deletes draft contracts only', function () {
     $service->decidePriceApproval($fx['parentUser'], $app, true);
 
     expect(fn () => $service->deleteDraft($fx['bpUser'], $contract2->fresh()))
-        ->toThrow(InvalidArgumentException::class, '下書き');
+        ->toThrow(InvalidArgumentException::class, 'オーダー作成中');
 });
 
 it('shows only the customer contracts on customer detail tab while header lists all scoped contracts', function () {
@@ -228,17 +561,17 @@ it('shows only the customer contracts on customer detail tab while header lists 
         ->assertSee('契約')
         ->assertSee($own->code)
         ->assertDontSee($other->code)
-        ->assertSee('新規申込')
+        ->assertSee('オーダー作成')
         ->assertSee('return_customer_id='.$fx['site']->customer_id);
 
     $this->get(route('bp.contracts.show', ['contract' => $own, 'return_customer_id' => $fx['site']->customer_id]))
         ->assertOk()
-        ->assertSee('カスタマー詳細へ')
+        ->assertSee('カスタマー詳細')
         ->assertSee(route('bp.customers.show', ['customer' => $fx['site']->customer_id, 'tab' => 'contracts'], false));
 
     $this->get(route('bp.contracts.show', $own))
         ->assertOk()
-        ->assertSee('一覧へ')
+        ->assertSee('契約一覧')
         ->assertDontSee('カスタマー詳細へ');
 });
 
@@ -253,7 +586,16 @@ it('marks service provided with first billing month and allows messages until th
 
     $message = $service->postMessage($fx['bpUser'], $contract, '現地調査が必要です');
     expect($message->body)->toBe('現地調査が必要です')
-        ->and($service->canPostMessages($contract))->toBeTrue();
+        ->and($service->canPostMessages($contract))->toBeTrue()
+        ->and($service->unreadMessageContractCount($fx['parentUser'], [$fx['parent']->id, $fx['child']->id]))->toBe(1);
+
+    $this->actingAs($fx['parentUser'], 'bp')
+        ->get(route('bp.contracts.show', ['contract' => $contract, 'tab' => 'messages']))
+        ->assertOk()
+        ->assertSee('現地調査が必要です')
+        ->assertSeeLivewire('contract-chat');
+
+    expect($service->unreadMessageContractCount($fx['parentUser'], [$fx['parent']->id, $fx['child']->id]))->toBe(0);
 
     $service->activate($fx['bpUser'], $contract, '202601');
     $contract = $contract->fresh();

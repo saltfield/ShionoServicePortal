@@ -7,6 +7,14 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
+    @php $prefix = $routePrefix ?? 'admin'; @endphp
+    @include('partials.breadcrumb', [
+        'crumbs' => [
+            ['label' => 'カスタマー', 'url' => route($prefix.'.customers.index', ['managing_bp_id' => $site->customer->managing_bp_id])],
+            ['label' => 'カスタマー詳細', 'url' => route($prefix.'.customers.show', ['customer' => $site->customer, 'tab' => 'sites'])],
+        ],
+        'current' => '拠点編集',
+    ])
     <h1 class="h3 mb-3">拠点編集</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>

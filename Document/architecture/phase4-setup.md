@@ -42,13 +42,15 @@
 | name / description | |
 | billing_type | `initial` \| `running` |
 | required_item_id | 任意。必須セット先品目（自己参照・循環禁止） |
-| partition_price | 標準仕切り（税別・整数円） |
-| recommended_price | 推奨（税別） |
-| user_price | ユーザー向け標準（税別） |
+| partition_price | 標準仕切り（税別・整数円）。卸未設定時のフォールバック |
+| recommended_price | 推奨価格（税別）。**参照用のみ。計算・初期値には使わない** |
+| user_price | ユーザー標準（税別）。カスタマー価格未設定時のフォールバック／契約EU単価の初期値 |
 | tax_rate | 消費税率％（既定 10） |
 | is_active | |
 
 表示はすべて **税別** 表記し、右側に税込（四捨五入）を併記する。
+
+価格の意味・優先順位の詳細は **[pricing.md](pricing.md)** を参照。
 
 
 ## Phase 5 への引き継ぎ

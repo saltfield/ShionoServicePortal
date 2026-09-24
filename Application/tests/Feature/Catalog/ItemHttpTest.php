@@ -30,9 +30,17 @@ it('allows admin to create item via http', function () {
         'password' => 'Password123!',
     ]);
 
+    $type = \App\Models\ItemType::query()->create([
+        'name' => 'テスト種別',
+        'message' => null,
+        'is_active' => true,
+        'owning_bp_id' => null,
+    ]);
+
     $this->post(route('admin.items.store'), [
         'name' => '光回線イニシャル',
         'billing_type' => BillingType::Initial->value,
+        'item_type_id' => $type->id,
         'partition_price' => 3000,
         'recommended_price' => 5000,
         'user_price' => 5000,
@@ -47,6 +55,7 @@ it('allows admin to create item via http', function () {
     $this->post(route('admin.items.store'), [
         'name' => '光回線月額',
         'billing_type' => BillingType::Running->value,
+        'item_type_id' => $type->id,
         'required_item_id' => $initial->id,
         'partition_price' => 2000,
         'recommended_price' => 4000,

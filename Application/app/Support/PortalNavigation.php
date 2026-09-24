@@ -70,6 +70,7 @@ final class PortalNavigation
                     'label' => '品目管理',
                     'children' => [
                         ['label' => '品目', 'route' => 'admin.items.index', 'permission' => 'item.manage'],
+                        ['label' => '品目種別', 'route' => 'admin.item-types.index', 'permission' => 'item.manage'],
                         ['label' => '卸価格', 'route' => 'admin.prices.wholesale.index', 'permission' => 'price.wholesale.edit'],
                     ],
                 ],
@@ -79,6 +80,8 @@ final class PortalNavigation
                         ['label' => 'お知らせ', 'route' => 'admin.announcements.index', 'permission' => null],
                         ['label' => '契約一覧', 'route' => 'admin.contracts.index', 'permission' => 'contract.view'],
                         ['label' => '請求一覧', 'route' => 'admin.invoices.index', 'permission' => 'invoice.view'],
+                        ['label' => 'キックバック', 'route' => 'admin.kickbacks.index', 'permission' => 'invoice.view'],
+                        ['label' => '自動請求設定', 'route' => 'admin.billing-batch.edit', 'permission' => 'invoice.manage'],
                         ['label' => '価格申請', 'route' => 'admin.applications.index', 'permission' => 'contract.approve'],
                         ['label' => 'データ名称', 'route' => 'admin.data-field-names.index', 'permission' => 'item.manage'],
                         ['label' => '2FAモード', 'route' => 'admin.bp-two-factor.index', 'permission' => 'admin.bp.two_factor.manage'],
@@ -101,6 +104,7 @@ final class PortalNavigation
                     'label' => '品目管理',
                     'children' => [
                         ['label' => '品目', 'route' => 'bp.items.index', 'permission' => ['price.wholesale.edit', 'price.customer.edit', 'contract.create']],
+                        ['label' => '品目種別', 'route' => 'bp.item-types.index', 'permission' => 'contract.create'],
                         ['label' => '卸価格', 'route' => 'bp.prices.wholesale.index', 'permission' => 'price.wholesale.edit'],
                     ],
                 ],
@@ -110,6 +114,7 @@ final class PortalNavigation
                         ['label' => 'お知らせ', 'route' => 'bp.announcements.index', 'permission' => null],
                         ['label' => '契約一覧', 'route' => 'bp.contracts.index', 'permission' => 'contract.view'],
                         ['label' => '請求一覧', 'route' => 'bp.invoices.index', 'permission' => 'invoice.view'],
+                        ['label' => 'キックバック', 'route' => 'bp.kickbacks.index', 'permission' => 'invoice.view'],
                         ['label' => '価格申請', 'route' => 'bp.applications.index', 'permission' => 'contract.approve'],
                     ],
                 ],

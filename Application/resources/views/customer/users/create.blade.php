@@ -4,6 +4,10 @@
 @section('area', 'カスタマー')
 
 @section('content')
+    @include('partials.breadcrumb', [
+        'crumbs' => [['label' => 'ユーザー管理', 'url' => route('customer.users.index')]],
+        'current' => 'ユーザー作成',
+    ])
     <h1 class="h3 mb-3">ユーザー作成</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
@@ -51,6 +55,5 @@
             <label class="form-check-label" for="is_active">有効</label>
         </div>
         <button class="btn btn-primary" type="submit">作成</button>
-        <a href="{{ route('customer.users.index') }}" class="btn btn-link">一覧へ</a>
     </form>
 @endsection

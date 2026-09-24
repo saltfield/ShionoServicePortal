@@ -20,7 +20,8 @@ class ApplicationController extends Controller
 
         $applications = Application::query()
             ->with(['contract', 'fromBp', 'toBp'])
-            ->latest()
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->paginate(20);
 
         return view('admin.applications.index', [

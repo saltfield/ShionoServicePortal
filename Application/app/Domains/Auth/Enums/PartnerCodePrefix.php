@@ -9,6 +9,7 @@ enum PartnerCodePrefix: string
     case Item = 'ITEM';
     case Contract = 'CTR';
     case Invoice = 'INV';
+    case Kickback = 'KB';
     case Ticket = 'TKT';
 
     public static function tryFromNormalized(string $value): ?self

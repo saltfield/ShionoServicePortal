@@ -31,6 +31,28 @@ services:
       - ssp-net
     restart: unless-stopped
 
+  # Laravel スケジューラ（自動請求など）。schedule:work が毎分タスクを起動する。
+  scheduler:
+    build:
+      context: ./php
+      dockerfile: Dockerfile
+    container_name: ssp-scheduler
+    command: php artisan schedule:work
+    user: "1000:1000"
+    volumes:
+      - ../Application:/var/www/html
+      - ./php/php.ini:/usr/local/etc/php/conf.d/zz-custom.ini:ro
+    environment:
+      TZ: Asia/Tokyo
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      php:
+        condition: service_started
+    networks:
+      - ssp-net
+    restart: unless-stopped
+
   mariadb:
     image: mariadb:11.4
     container_name: ssp-mariadb

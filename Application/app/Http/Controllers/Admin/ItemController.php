@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Domains\Catalog\Enums\BillingType;
 use App\Domains\Catalog\Services\CatalogPricingService;
+use App\Domains\Catalog\Support\ItemTypeOptions;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Http\Controllers\Concerns\ConfirmsItemDeletion;
 use App\Http\Controllers\Concerns\ConfirmsItemDocumentDeletion;
@@ -44,6 +45,7 @@ class ItemController extends Controller
         return view('admin.items.create', [
             'routePrefix' => 'admin',
             'billingTypes' => BillingType::cases(),
+            'itemTypes' => ItemTypeOptions::selectable(),
             'requiredCandidates' => Item::query()->whereNull('owning_bp_id')->orderBy('code')->get(),
         ]);
     }
@@ -51,6 +53,12 @@ class ItemController extends Controller
     public function store(Request $request, CatalogPricingService $service): RedirectResponse
     {
         $validated = $this->validatedItem($request);
+
+        try {
+            ItemTypeOptions::assertAssignable((int) $validated['item_type_id']);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['item_type_id' => $exception->getMessage()]);
+        }
 
         try {
             $item = $service->createItem($request->user('admin'), $validated);
@@ -66,7 +74,7 @@ class ItemController extends Controller
     public function show(Request $request, Item $item, AuthorizationService $authorization): View
     {
         $authorization->authorize($request->user('admin'), 'item.manage');
-        $item->load(['requiredItem', 'documents']);
+        $item->load(['requiredItem', 'documents', 'itemType']);
 
         return view('admin.items.show', [
             'item' => $item,
@@ -90,6 +98,7 @@ class ItemController extends Controller
             'item' => $item,
             'routePrefix' => 'admin',
             'billingTypes' => BillingType::cases(),
+            'itemTypes' => ItemTypeOptions::selectable(null, $item->item_type_id ? (int) $item->item_type_id : null),
             'requiredCandidates' => Item::query()
                 ->whereNull('owning_bp_id')
                 ->whereKeyNot($item->id)
@@ -101,6 +110,12 @@ class ItemController extends Controller
     public function update(Request $request, Item $item, CatalogPricingService $service): RedirectResponse
     {
         $validated = $this->validatedItem($request);
+
+        try {
+            ItemTypeOptions::assertAssignable((int) $validated['item_type_id']);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['item_type_id' => $exception->getMessage()]);
+        }
 
         try {
             $service->updateItem($request->user('admin'), $item, $validated);
@@ -137,6 +152,7 @@ class ItemController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:2000'],
             'billing_type' => ['required', Rule::enum(BillingType::class)],
+            'item_type_id' => ['required', 'integer', 'exists:item_types,id'],
             'required_item_id' => ['nullable', 'integer', 'exists:items,id'],
             'partition_price' => ['required', 'integer', 'min:0'],
             'recommended_price' => ['required', 'integer', 'min:0'],
@@ -150,6 +166,7 @@ class ItemController extends Controller
         $validated['required_item_id'] = $validated['required_item_id'] ?? null;
         $validated['tax_rate'] = (int) $validated['tax_rate'];
         $validated['minimum_term_months'] = $validated['minimum_term_months'] ?? null;
+        $validated['item_type_id'] = (int) $validated['item_type_id'];
 
         return $validated;
     }

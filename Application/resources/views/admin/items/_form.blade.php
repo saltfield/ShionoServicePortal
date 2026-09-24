@@ -18,6 +18,21 @@
     </select>
 </div>
 <div class="mb-3">
+    <label class="form-label" for="item_type_id">品目種別 <span class="text-danger">*</span></label>
+    <select name="item_type_id" id="item_type_id" class="form-select" required>
+        <option value="">選択してください</option>
+        @foreach (($itemTypes ?? []) as $itemType)
+            <option value="{{ $itemType->id }}" @selected((int) old('item_type_id', $item?->item_type_id) === $itemType->id)>
+                {{ $itemType->name }}
+                @if ($itemType->owning_bp_id)
+                    （BP独自）
+                @endif
+            </option>
+        @endforeach
+    </select>
+    <div class="form-text">オーダー作成時の案内メッセージに使います。課金区分（イニシャル／ランニング）とは別です。</div>
+</div>
+<div class="mb-3">
     <label class="form-label" for="required_item_id">必須セット品目（任意）</label>
     <select name="required_item_id" id="required_item_id" class="form-select">
         <option value="">なし</option>
@@ -34,15 +49,19 @@
     <input type="number" step="1" min="0" name="partition_price" id="partition_price" class="form-control" value="{{ old('partition_price', $item?->partition_price ?? 0) }}" required>
     @if (($formMode ?? null) === 'bp_owned')
         <div class="form-text">自社独自サービスの原価・仕切りです。親BPからの卸価格には影響しません。</div>
+    @else
+        <div class="form-text">BP間卸の既定値です。親子の卸価格が未設定のときに使われます。</div>
     @endif
 </div>
 <div class="mb-3">
     <label class="form-label" for="recommended_price">推奨価格（税別）</label>
     <input type="number" step="1" min="0" name="recommended_price" id="recommended_price" class="form-control" value="{{ old('recommended_price', $item?->recommended_price ?? 0) }}" required>
+    <div class="form-text">カタログ上の目安です。契約・請求の初期値や計算には使いません。</div>
 </div>
 <div class="mb-3">
     <label class="form-label" for="user_price">ユーザー標準（税別）</label>
     <input type="number" step="1" min="0" name="user_price" id="user_price" class="form-control" value="{{ old('user_price', $item?->user_price ?? 0) }}" required>
+    <div class="form-text">カスタマー向け売価の既定値です。個別カスタマー価格が未設定のときに使われます。</div>
 </div>
 <div class="mb-3">
     <label class="form-label" for="tax_rate">消費税率（%）</label>

@@ -23,5 +23,7 @@
 
 ## Soft Delete
 
-`users`, `business_partners`, `customers`, `items`, `contracts`, `inquiries`, `announcements` は `deleted_at` を推奨。  
+`users`, `business_partners`, `customers`, `items`, `contracts`, `inquiries`, `announcements`, `invoices`, `kickback_invoices` は `deleted_at`（または同等の論理削除）を持つ。  
 クロージャ整合性のため、BP削除は論理削除＋配下制約を Phase 3 で詳細化。
+
+請求・キックバック・バッチ実行テーブルの現行定義は [er-diagram.md](er-diagram.md) および Phase 10 マイグレーションを参照。

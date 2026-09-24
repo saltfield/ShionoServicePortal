@@ -24,13 +24,21 @@
         if ($selectedCustomerId) {
             $typeSwitchQuery['customer_id'] = $selectedCustomerId;
         }
-        $backUrl = $returnCustomerId
-            ? route($prefix.'.customers.show', ['customer' => $returnCustomerId, 'tab' => 'users'])
-            : ($returnBpId
-                ? route($prefix.'.business-partners.show', ['businessPartner' => $returnBpId, 'tab' => 'users'])
-                : route($prefix.'.users.index'));
-        $backLabel = $returnCustomerId ? 'カスタマー詳細へ' : ($returnBpId ? 'BP詳細へ' : '一覧へ');
+        if ($returnCustomerId) {
+            $crumbs = [
+                ['label' => 'カスタマー詳細', 'url' => route($prefix.'.customers.show', ['customer' => $returnCustomerId, 'tab' => 'users'])],
+            ];
+        } elseif ($returnBpId) {
+            $crumbs = [
+                ['label' => 'BP詳細', 'url' => route($prefix.'.business-partners.show', ['businessPartner' => $returnBpId, 'tab' => 'users'])],
+            ];
+        } else {
+            $crumbs = [
+                ['label' => 'ユーザー管理', 'url' => route($prefix.'.users.index')],
+            ];
+        }
     @endphp
+    @include('partials.breadcrumb', ['crumbs' => $crumbs, 'current' => 'ユーザー作成'])
     <h1 class="h3 mb-3">ユーザー作成</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
@@ -127,6 +135,5 @@
             <label class="form-check-label" for="is_active">有効</label>
         </div>
         <button class="btn btn-primary" type="submit">作成</button>
-        <a href="{{ $backUrl }}" class="btn btn-link">{{ $backLabel }}</a>
     </form>
 @endsection

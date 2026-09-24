@@ -63,7 +63,7 @@
                     <td>{{ $partner->name }}</td>
                     <td>{{ $partner->depth }}</td>
                     <td>{{ $partner->parent?->code ?? '-' }}</td>
-                    <td>{{ $partner->two_factor_mode?->value }}</td>
+                    <td>{{ $partner->two_factor_mode?->label() ?? '—' }}</td>
                     <td>{{ $partner->is_active ? '有効' : '無効' }}</td>
                     <td><a href="{{ route(($routePrefix ?? 'admin').'.business-partners.show', $partner) }}" class="btn btn-outline-secondary btn-sm">詳細</a></td>
                 </tr>

@@ -13,9 +13,9 @@ enum ContractStatus: string
     public function label(): string
     {
         return match ($this) {
-            self::Draft => '下書き',
+            self::Draft => 'オーダー作成中',
             self::PendingPriceApproval => '価格承認待ち',
-            self::Approved => '承認済',
+            self::Approved => '承認済・手配中',
             self::Activated => 'サービス提供開始',
             self::Cancelled => '解約',
         };

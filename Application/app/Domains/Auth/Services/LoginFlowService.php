@@ -3,6 +3,7 @@
 namespace App\Domains\Auth\Services;
 
 use App\Domains\Auth\Enums\UserType;
+use App\Domains\Auth\Support\GuardAwareRedirect;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Session;
@@ -44,7 +45,7 @@ class LoginFlowService
             return redirect()->route("{$guard}.password.edit");
         }
 
-        return redirect()->intended(route("{$guard}.dashboard"));
+        return GuardAwareRedirect::intended($guard, route("{$guard}.dashboard"));
     }
 
     public function pendingUser(string $guard): ?User

@@ -104,19 +104,61 @@ it('issues invoice with initial and running lines for activation month', functio
 
 it('issues only running lines for later months', function () {
     $fx = billingFixture();
+    $billing = app(BillingService::class);
+    $billing->issueFromContract($fx['bpUser'], $fx['contract'], $fx['activatedYm']);
+
     $later = now()->addMonthNoOverflow()->format('Ym');
     if ($later === $fx['activatedYm']) {
         $later = now()->addMonthsNoOverflow(2)->format('Ym');
     }
 
-    $invoice = app(BillingService::class)->issueFromContract($fx['bpUser'], $fx['contract'], $later);
+    $invoice = $billing->issueFromContract($fx['bpUser'], $fx['contract'], $later);
 
     expect($invoice->lines)->toHaveCount(1)
         ->and($invoice->lines->first()->billing_type)->toBe(BillingType::Running)
         ->and($invoice->subtotal)->toBe(5000);
 });
 
-it('marks paid and cancels with constraints', function () {
+it('uses end-user unit_price not partition for customer invoice', function () {
+    $fx = billingFixture();
+    $line = $fx['contract']->items->firstWhere(fn ($item) => $item->item?->billing_type === BillingType::Initial);
+    $line->update(['unit_price' => 100000, 'partition_price' => 60000]);
+
+    $invoice = app(BillingService::class)->issueFromContract(
+        $fx['bpUser'],
+        $fx['contract']->fresh(['items.item', 'owningBp', 'customer']),
+        $fx['activatedYm'],
+    );
+
+    $initialLine = $invoice->lines->firstWhere('billing_type', BillingType::Initial);
+    expect($initialLine)->not->toBeNull()
+        ->and((int) $initialLine->unit_price)->toBe(100000)
+        ->and((int) $initialLine->amount)->toBe(100000);
+});
+
+it('catch-up bills missed initial in a later month at unit_price', function () {
+    $fx = billingFixture();
+    $line = $fx['contract']->items->firstWhere(fn ($item) => $item->item?->billing_type === BillingType::Initial);
+    $line->update(['unit_price' => 100000, 'partition_price' => 60000]);
+
+    $later = now()->addMonthNoOverflow()->format('Ym');
+    if ($later === $fx['activatedYm']) {
+        $later = now()->addMonthsNoOverflow(2)->format('Ym');
+    }
+
+    $invoice = app(BillingService::class)->issueFromContract(
+        $fx['bpUser'],
+        $fx['contract']->fresh(['items.item', 'owningBp', 'customer']),
+        $later,
+    );
+
+    $initialLine = $invoice->lines->firstWhere('billing_type', BillingType::Initial);
+    expect($initialLine)->not->toBeNull()
+        ->and((int) $initialLine->amount)->toBe(100000)
+        ->and($invoice->lines->contains(fn ($row) => $row->billing_type === BillingType::Running))->toBeTrue();
+});
+
+it('marks paid and withdraws with constraints', function () {
     $fx = billingFixture();
     $billing = app(BillingService::class);
     $invoice = $billing->issueFromContract($fx['bpUser'], $fx['contract'], $fx['activatedYm']);
@@ -124,7 +166,7 @@ it('marks paid and cancels with constraints', function () {
     $billing->markPaid($fx['bpUser'], $invoice);
     expect($invoice->fresh()->status)->toBe(InvoiceStatus::Paid);
 
-    expect(fn () => $billing->cancel($fx['bpUser'], $invoice->fresh()))
+    expect(fn () => $billing->withdraw($fx['bpUser'], $invoice->fresh()))
         ->toThrow(InvalidArgumentException::class);
 
     $later = now()->addMonthNoOverflow()->format('Ym');
@@ -132,8 +174,8 @@ it('marks paid and cancels with constraints', function () {
         $later = now()->addMonthsNoOverflow(2)->format('Ym');
     }
     $second = $billing->issueFromContract($fx['bpUser'], $fx['contract'], $later);
-    $billing->cancel($fx['bpUser'], $second);
-    expect($second->fresh()->status)->toBe(InvoiceStatus::Cancelled);
+    $billing->withdraw($fx['bpUser'], $second);
+    expect($second->fresh()->status)->toBe(InvoiceStatus::Withdrawn);
 });
 
 it('scopes customer visibility to own invoices', function () {

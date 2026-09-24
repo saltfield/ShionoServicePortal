@@ -51,4 +51,37 @@ class Application extends Model
     {
         return $this->belongsTo(User::class, 'decided_by_user_id');
     }
+
+    public function requiresApprovalChain(): bool
+    {
+        $chain = is_array($this->payload_json) ? ($this->payload_json['chain'] ?? null) : null;
+
+        return is_array($chain) && ! empty($chain['required']);
+    }
+
+    /**
+     * @return array{step: int, total: int}|null
+     */
+    public function approvalProgress(): ?array
+    {
+        if (! $this->requiresApprovalChain()) {
+            return null;
+        }
+
+        $chain = $this->payload_json['chain'];
+        $step = max(1, (int) ($chain['step'] ?? 1));
+        $total = max(1, (int) ($chain['total'] ?? 1));
+
+        return [
+            'step' => min($step, $total),
+            'total' => $total,
+        ];
+    }
+
+    public function approvalProgressLabel(): ?string
+    {
+        $progress = $this->approvalProgress();
+
+        return $progress === null ? null : $progress['step'].'/'.$progress['total'];
+    }
 }

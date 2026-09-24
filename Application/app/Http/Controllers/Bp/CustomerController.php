@@ -105,12 +105,16 @@ class CustomerController extends Controller
         $canManageUsers = $rbac->hasPermission($actor, 'iam.user.manage');
         $canViewContracts = $rbac->hasPermission($actor, 'contract.view');
         $canCreateContracts = $rbac->hasPermission($actor, 'contract.create');
+        $canViewInvoices = $rbac->hasPermission($actor, 'invoice.view');
         $customerUsers = $canManageUsers
             ? $customer->users()->with('roles')->orderBy('login_id')->get()
             : collect();
         $customerContracts = $canViewContracts
             ? $customer->contracts()->with(['site', 'owningBp'])->latest()->get()
             : collect();
+        $customerInvoices = $canViewInvoices
+            ? $customer->invoices()->with(['owningBp', 'issuerBp', 'contract'])->latest('id')->paginate(20)->withQueryString()
+            : null;
 
         return view('admin.customers.show', [
             'customer' => $customer,
@@ -119,9 +123,11 @@ class CustomerController extends Controller
             'canManageUsers' => $canManageUsers,
             'canViewContracts' => $canViewContracts,
             'canCreateContracts' => $canCreateContracts,
+            'canViewInvoices' => $canViewInvoices,
             'customerUsers' => $customerUsers,
             'customerContracts' => $customerContracts,
-            'activeTab' => $this->resolveCustomerShowTab($request, $canManageUsers, $canViewContracts),
+            'customerInvoices' => $customerInvoices,
+            'activeTab' => $this->resolveCustomerShowTab($request, $canManageUsers, $canViewContracts, $canViewInvoices),
         ]);
     }
 
@@ -164,8 +170,12 @@ class CustomerController extends Controller
             ->with('status', 'カスタマーを削除しました。');
     }
 
-    private function resolveCustomerShowTab(Request $request, bool $canManageUsers, bool $canViewContracts): string
-    {
+    private function resolveCustomerShowTab(
+        Request $request,
+        bool $canManageUsers,
+        bool $canViewContracts,
+        bool $canViewInvoices = false,
+    ): string {
         $tab = (string) $request->input('tab', 'overview');
         $allowed = ['overview', 'sites', 'prices'];
         if ($canManageUsers) {
@@ -173,6 +183,9 @@ class CustomerController extends Controller
         }
         if ($canViewContracts) {
             $allowed[] = 'contracts';
+        }
+        if ($canViewInvoices) {
+            $allowed[] = 'invoices';
         }
 
         return in_array($tab, $allowed, true) ? $tab : 'overview';

@@ -49,7 +49,7 @@ class UserManagementService
                 'name' => $data['name'],
                 'email' => $data['email'] ?? null,
                 'is_active' => (bool) ($data['is_active'] ?? true),
-                'must_change_password' => (bool) ($data['must_change_password'] ?? true),
+                'must_change_password' => (bool) ($data['must_change_password'] ?? false),
             ]);
 
             $this->syncPrimaryRole($user, (string) $data['role_code']);

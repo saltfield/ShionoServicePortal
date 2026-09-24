@@ -1,0 +1,243 @@
+<?php
+
+use App\Domains\Auth\Enums\PartnerCodePrefix;
+use App\Domains\Auth\Enums\TwoFactorMode;
+use App\Domains\Auth\Services\BpHierarchyService;
+use App\Domains\Auth\Services\NumberSequenceService;
+use App\Domains\Billing\Enums\InvoiceStatus;
+use App\Domains\Billing\Services\BillingScheduleService;
+use App\Domains\Billing\Services\KickbackService;
+use App\Domains\Billing\Services\MonthlyBillingService;
+use App\Domains\Catalog\Enums\BillingType;
+use App\Domains\Catalog\Services\CatalogPricingService;
+use App\Domains\Contract\Enums\ApplicationStatus;
+use App\Domains\Contract\Enums\ContractStatus;
+use App\Domains\Contract\Services\ContractService;
+use App\Domains\Iam\Enums\RoleScope;
+use App\Domains\Iam\Services\RbacService;
+use App\Domains\Billing\Enums\BillingBatchRunStatus;
+use App\Models\BillingBatchError;
+use App\Models\BillingBatchRun;
+use App\Models\ContractItemPriceLayer;
+use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\KickbackInvoice;
+use App\Models\Site;
+use App\Models\User;
+use Database\Seeders\AbacSeeder;
+use Database\Seeders\IamSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+
+uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    $this->seed(IamSeeder::class);
+    $this->seed(AbacSeeder::class);
+});
+
+function monthlyBillingFixture(): array
+{
+    $seq = app(NumberSequenceService::class);
+    $hierarchy = app(BpHierarchyService::class);
+    $root = $hierarchy->createRoot($seq->next(PartnerCodePrefix::Bpn), 'KB Root');
+    $mid = $hierarchy->createChild($root, $seq->next(PartnerCodePrefix::Bpn), 'KB Mid');
+    $leaf = $hierarchy->createChild($mid, $seq->next(PartnerCodePrefix::Bpn), 'KB Leaf');
+
+    $customer = Customer::query()->create([
+        'code' => $seq->next(PartnerCodePrefix::Cn),
+        'managing_bp_id' => $leaf->id,
+        'name' => 'KB Customer',
+        'entity_type' => 'corporate',
+        'two_factor_mode' => TwoFactorMode::Optional,
+        'is_active' => true,
+    ]);
+    $site = Site::query()->create([
+        'customer_id' => $customer->id,
+        'name' => '本社',
+        'billing_name' => '請求先',
+        'is_primary' => true,
+        'is_active' => true,
+    ]);
+
+    $admin = User::factory()->admin()->create(['login_id' => 'KBADMIN', 'password' => 'Password123!']);
+    app(RbacService::class)->assignRole($admin, 'system_admin', RoleScope::System);
+    $leafUser = User::factory()->bp($leaf)->create(['login_id' => 'KBLEAF', 'password' => 'Password123!', 'must_change_password' => false]);
+    app(RbacService::class)->assignRole($leafUser, 'bp_owner', RoleScope::Bp, $leaf->id);
+    $midUser = User::factory()->bp($mid)->create(['login_id' => 'KBMID', 'password' => 'Password123!', 'must_change_password' => false]);
+    app(RbacService::class)->assignRole($midUser, 'bp_owner', RoleScope::Bp, $mid->id);
+    $rootUser = User::factory()->bp($root)->create(['login_id' => 'KBROOT', 'password' => 'Password123!', 'must_change_password' => false]);
+    app(RbacService::class)->assignRole($rootUser, 'bp_owner', RoleScope::Bp, $root->id);
+
+    $catalog = app(CatalogPricingService::class);
+    $running = $catalog->createItem($admin, [
+        'name' => '月額KB',
+        'billing_type' => BillingType::Running->value,
+        'partition_price' => 1000,
+        'user_price' => 5000,
+        'tax_rate' => 10,
+    ]);
+    $catalog->upsertWholesalePrice($midUser, $running, $mid, $leaf, 3000);
+    $catalog->upsertWholesalePrice($rootUser, $running, $root, $mid, 1500);
+
+    $contracts = app(ContractService::class);
+    $contract = $contracts->createDraft($leafUser, $site, [$running->id]);
+    $contract->items->first()->update(['unit_price' => 5000, 'partition_price' => 3000]);
+    $app = $contracts->submitPriceApproval($leafUser, $contract->fresh());
+    $forwarded = $contracts->decidePriceApproval($midUser, $app, true);
+    expect($contract->fresh()->status)->toBe(ContractStatus::PendingPriceApproval)
+        ->and($forwarded->status)->toBe(ApplicationStatus::Pending)
+        ->and($forwarded->approvalProgressLabel())->toBe('2/2');
+    $contracts->decidePriceApproval($rootUser, $forwarded, true);
+    $contracts->activate($leafUser, $contract->fresh(), '202609');
+
+    return [
+        'admin' => $admin,
+        'root' => $root,
+        'mid' => $mid,
+        'leaf' => $leaf,
+        'leafUser' => $leafUser,
+        'midUser' => $midUser,
+        'rootUser' => $rootUser,
+        'contract' => $contract->fresh(['items.priceLayers', 'owningBp']),
+        'customer' => $customer,
+    ];
+}
+
+it('snapshots price layers on approval', function () {
+    $fx = monthlyBillingFixture();
+    $layers = ContractItemPriceLayer::query()->where('contract_item_id', $fx['contract']->items->first()->id)->get();
+
+    expect($layers)->toHaveCount(2);
+});
+
+it('generates customer invoice for issuer root and owning leaf', function () {
+    $fx = monthlyBillingFixture();
+    $stats = app(MonthlyBillingService::class)->run('202609', $fx['admin']);
+
+    expect($stats['invoices'])->toBe(1)
+        ->and($stats['errors'])->toBe(0)
+        ->and($stats['status'])->toBe(BillingBatchRunStatus::Success->value);
+
+    $invoice = Invoice::query()->first();
+    expect($invoice->issuer_bp_id)->toBe($fx['root']->id)
+        ->and($invoice->owning_bp_id)->toBe($fx['leaf']->id)
+        ->and($invoice->billing_year_month)->toBe('202609')
+        ->and($invoice->due_year_month)->toBe('202610')
+        ->and($invoice->status->label())->toBe('発行済');
+
+    $run = BillingBatchRun::query()->find($stats['run_id']);
+    expect($run)->not->toBeNull()
+        ->and($run->status)->toBe(BillingBatchRunStatus::Success)
+        ->and($run->invoices_count)->toBe(1)
+        ->and($run->errors_count)->toBe(0)
+        ->and($run->actor_user_id)->toBe($fx['admin']->id);
+});
+
+it('generates multi-tier kickbacks from sixth billing month', function () {
+    $fx = monthlyBillingFixture();
+    // kickback start = 202609 + 5 months = 202702
+    app(MonthlyBillingService::class)->run('202609', $fx['admin']);
+    expect(KickbackInvoice::query()->count())->toBe(0);
+
+    $stats = app(MonthlyBillingService::class)->run('202702', $fx['admin']);
+    expect($stats['kickbacks'])->toBe(2)
+        ->and($stats['errors'])->toBe(0);
+
+    $leafToMid = KickbackInvoice::query()->where('from_bp_id', $fx['leaf']->id)->where('to_bp_id', $fx['mid']->id)->first();
+    $midToRoot = KickbackInvoice::query()->where('from_bp_id', $fx['mid']->id)->where('to_bp_id', $fx['root']->id)->first();
+
+    expect($leafToMid->subtotal)->toBe(2000) // 5000-3000
+        ->and($midToRoot->subtotal)->toBe(1500); // 3000-1500
+});
+
+it('records negative kickback as batch error and continues', function () {
+    $fx = monthlyBillingFixture();
+    $line = $fx['contract']->items->first();
+    $line->update(['unit_price' => 1000]); // less than mid->leaf wholesale 3000
+    ContractItemPriceLayer::query()->where('contract_item_id', $line->id)->delete();
+    app(\App\Domains\Contract\Services\ContractPriceLayerService::class)->syncForContract($fx['contract']->fresh(['owningBp', 'items.item']));
+
+    $stats = app(MonthlyBillingService::class)->run('202702', $fx['admin']);
+    expect($stats['errors'])->toBeGreaterThan(0)
+        ->and($stats['status'])->not->toBe(BillingBatchRunStatus::Success->value)
+        ->and(BillingBatchError::query()->where('phase', 'kickback')->exists())->toBeTrue();
+
+    $error = BillingBatchError::query()->where('phase', 'kickback')->first();
+    $run = BillingBatchRun::query()->find($stats['run_id']);
+    expect($error->billing_batch_run_id)->toBe($run->id)
+        ->and($run->errors_count)->toBeGreaterThan(0)
+        ->and(in_array($run->status, [BillingBatchRunStatus::Partial, BillingBatchRunStatus::Failed], true))->toBeTrue();
+});
+
+it('shows generation history on batch settings page', function () {
+    $fx = monthlyBillingFixture();
+    app(MonthlyBillingService::class)->run('202609', $fx['admin']);
+
+    $this->actingAs($fx['admin'], 'admin')
+        ->get(route('admin.billing-batch.edit'))
+        ->assertOk()
+        ->assertSee('生成履歴')
+        ->assertSee('成功')
+        ->assertSee('202609')
+        ->assertSee('請求一覧');
+});
+
+it('lists invoices created by a batch run', function () {
+    $fx = monthlyBillingFixture();
+    $stats = app(MonthlyBillingService::class)->run('202609', $fx['admin']);
+
+    $invoice = Invoice::query()->first();
+    expect($invoice->billing_batch_run_id)->toBe($stats['run_id']);
+
+    $this->actingAs($fx['admin'], 'admin')
+        ->get(route('admin.billing-batch.runs.show', $stats['run_id']))
+        ->assertOk()
+        ->assertSee('作成された請求書')
+        ->assertSee($invoice->code)
+        ->assertSee($fx['customer']->name);
+});
+
+it('resolves nonexistent day_of_month to month end for schedule', function () {
+    $service = app(BillingScheduleService::class);
+    $service->updateSchedule([
+        'enabled' => true,
+        'day_mode' => 'day_of_month',
+        'day_of_month' => 31,
+        'time' => '10:00',
+        'timezone' => 'Asia/Tokyo',
+    ]);
+
+    $feb28 = Carbon::parse('2026-02-28 10:00:00', 'Asia/Tokyo');
+    expect($service->shouldRunAt($feb28))->toBeTrue();
+
+    $feb27 = Carbon::parse('2026-02-27 10:00:00', 'Asia/Tokyo');
+    expect($service->shouldRunAt($feb27))->toBeFalse();
+});
+
+it('runs scheduled batch after configured time once per billing month', function () {
+    $fx = monthlyBillingFixture();
+    $service = app(BillingScheduleService::class);
+    $service->updateSchedule([
+        'enabled' => true,
+        'day_mode' => 'day_of_month',
+        'day_of_month' => 22,
+        'time' => '17:25',
+        'timezone' => 'Asia/Tokyo',
+    ]);
+
+    $before = Carbon::parse('2026-09-22 17:24:59', 'Asia/Tokyo');
+    expect(app(MonthlyBillingService::class)->runIfScheduled($before))->toBeNull();
+
+    $after = Carbon::parse('2026-09-22 17:26:00', 'Asia/Tokyo');
+    $stats = app(MonthlyBillingService::class)->runIfScheduled($after);
+    expect($stats)->not->toBeNull()
+        ->and($stats['billing_year_month'])->toBe('202609')
+        ->and($stats['status'])->toBe(BillingBatchRunStatus::Success->value);
+
+    expect(app(MonthlyBillingService::class)->runIfScheduled($after->copy()->addMinute()))->toBeNull();
+
+    $run = BillingBatchRun::query()->where('trigger', 'scheduled')->first();
+    expect($run)->not->toBeNull()
+        ->and($run->actor_user_id)->toBeNull();
+});

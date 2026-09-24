@@ -22,19 +22,28 @@ class ContractController extends Controller
     use DownloadsContractItemDocuments;
     use ResolvesContractShowTab;
 
-    public function index(Request $request, RbacService $rbac): View
+    public function index(Request $request, RbacService $rbac, ContractService $service): View
     {
         $actor = $request->user('customer');
         abort_unless($rbac->hasPermission($actor, 'contract.view'), 403);
         abort_unless($actor->customer_id, 403);
 
+        $unreadOnly = $request->boolean('unread_messages');
         $contracts = Contract::query()
             ->with(['site', 'owningBp'])
             ->where('customer_id', $actor->customer_id)
+            ->when($unreadOnly, function ($query) use ($service, $actor) {
+                $unreadIds = $service->unreadMessageContractIds($actor, null, (int) $actor->customer_id);
+                $query->whereIn('id', $unreadIds === [] ? [0] : $unreadIds);
+            })
             ->latest()
-            ->paginate(20);
+            ->paginate(20)
+            ->withQueryString();
 
-        return view('customer.contracts.index', compact('contracts'));
+        return view('customer.contracts.index', [
+            'contracts' => $contracts,
+            'unreadMessagesFilter' => $unreadOnly,
+        ]);
     }
 
     public function show(Request $request, Contract $contract, RbacService $rbac, ContractService $service): View
@@ -46,6 +55,7 @@ class ContractController extends Controller
         $contract->load([
             'customer', 'site', 'owningBp',
             'items.item', 'items.dataRows', 'items.documents',
+            'dataRows',
             'statusHistories',
             'messages.user',
         ]);

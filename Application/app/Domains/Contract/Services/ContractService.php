@@ -8,6 +8,7 @@ use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Auth\Services\NumberSequenceService;
 use App\Domains\Catalog\Enums\BillingType;
 use App\Domains\Catalog\Services\CatalogPricingService;
+use App\Domains\Catalog\Support\OrderCatalogScope;
 use App\Domains\Contract\Enums\ApplicationStatus;
 use App\Domains\Contract\Enums\ApplicationType;
 use App\Domains\Contract\Enums\ContractStatus;
@@ -17,10 +18,12 @@ use App\Domains\Iam\Services\BpRelationResolver;
 use App\Models\Application;
 use App\Models\BusinessPartner;
 use App\Models\Contract;
+use App\Models\ContractData;
 use App\Models\ContractItem;
 use App\Models\ContractItemData;
 use App\Models\ContractItemDocument;
 use App\Models\ContractMessage;
+use App\Models\ContractMessageRead;
 use App\Models\ContractStatusHistory;
 use App\Models\Customer;
 use App\Models\DataFieldName;
@@ -40,6 +43,8 @@ class ContractService
 {
     public const MAX_ITEM_DOCUMENTS = 5;
 
+    public const MAX_DATA_ROWS = 10;
+
     /** @var list<string> */
     public const ITEM_DOCUMENT_EXTENSIONS = ['xls', 'xlsx', 'xml', 'html', 'htm'];
 
@@ -51,9 +56,19 @@ class ContractService
         private readonly CatalogPricingService $pricing,
         private readonly BpRelationResolver $relationResolver,
         private readonly DocumentRenderService $documentRender,
+        private readonly ContractPriceLayerService $priceLayers,
     ) {}
 
-    public function createDraft(User $actor, Site $site, array $itemIds): Contract
+    /**
+     * @param  list<int>  $itemIds
+     * @param  array{
+     *   special_price_requested?: bool,
+     *   special_price_reason?: ?string,
+     *   partitions?: array<int|string, int|string>,
+     *   unit_prices?: array<int|string, int|string>
+     * }  $options
+     */
+    public function createDraft(User $actor, Site $site, array $itemIds, array $options = []): Contract
     {
         $site->loadMissing('customer.managingBp');
         $customer = $site->customer;
@@ -70,14 +85,24 @@ class ContractService
             throw new InvalidArgumentException('品目を1件以上選択してください。');
         }
 
+        $specialRequested = (bool) ($options['special_price_requested'] ?? false);
+        $specialReason = trim((string) ($options['special_price_reason'] ?? ''));
+        $requestedPartitions = $options['partitions'] ?? [];
+        $requestedUnitPrices = $options['unit_prices'] ?? [];
+
+        if ($specialRequested && $specialReason === '') {
+            throw new InvalidArgumentException('特価申請理由を入力してください。');
+        }
+
         $items = Item::query()->whereIn('id', $itemIds)->where('is_active', true)->get();
         if ($items->count() !== count($itemIds)) {
             throw new InvalidArgumentException('無効な品目が含まれています。');
         }
 
         $owningBp = $customer->managingBp;
+        $allowedOwnerBpIds = OrderCatalogScope::ownerBpIds($actor, $owningBp, $this->hierarchy);
         foreach ($items as $item) {
-            if ($item->owning_bp_id !== null && (int) $item->owning_bp_id !== (int) $owningBp->id) {
+            if (! OrderCatalogScope::itemAllowed($item, $allowedOwnerBpIds)) {
                 throw new InvalidArgumentException('他BPの独自サービスは契約に含められません。');
             }
         }
@@ -86,36 +111,78 @@ class ContractService
 
         $parentBp = $owningBp->parent;
 
-        return DB::transaction(function () use ($actor, $site, $customer, $owningBp, $parentBp, $items) {
+        if ($specialRequested) {
+            foreach ($items as $item) {
+                if (! array_key_exists((string) $item->id, $requestedPartitions) && ! array_key_exists($item->id, $requestedPartitions)) {
+                    throw new InvalidArgumentException("品目 {$item->code} の希望仕切りを入力してください。");
+                }
+                if (! array_key_exists((string) $item->id, $requestedUnitPrices) && ! array_key_exists($item->id, $requestedUnitPrices)) {
+                    throw new InvalidArgumentException("品目 {$item->code} のエンドユーザー価格を入力してください。");
+                }
+            }
+        }
+
+        $contract = DB::transaction(function () use ($actor, $site, $customer, $owningBp, $parentBp, $items, $specialRequested, $specialReason, $requestedPartitions, $requestedUnitPrices) {
             $contract = Contract::query()->create([
                 'code' => $this->sequences->next(PartnerCodePrefix::Contract),
                 'site_id' => $site->id,
                 'customer_id' => $customer->id,
                 'owning_bp_id' => $owningBp->id,
                 'status' => ContractStatus::Draft,
+                'special_price_requested' => $specialRequested,
+                'special_price_reason' => $specialRequested ? $specialReason : null,
             ]);
 
             foreach ($items as $item) {
-                $partition = $parentBp
+                $standardPartition = (int) ($parentBp
                     ? $this->pricing->resolveWholesaleAmount($item, $parentBp, $owningBp)
-                    : (string) $item->partition_price;
-                $unit = $this->pricing->resolveCustomerAmount($item, $customer, $owningBp);
+                    : $item->partition_price);
+                $defaultUnit = (int) $this->pricing->resolveCustomerAmount($item, $customer, $owningBp);
+
+                $partition = $standardPartition;
+                if ($specialRequested) {
+                    $raw = $requestedPartitions[$item->id] ?? $requestedPartitions[(string) $item->id] ?? null;
+                    $partition = (int) round((float) $raw);
+                    if ($partition < 0) {
+                        throw new InvalidArgumentException('希望仕切りは0以上で入力してください。');
+                    }
+                }
+
+                $unit = $defaultUnit;
+                $hasUnitOverride = array_key_exists($item->id, $requestedUnitPrices)
+                    || array_key_exists((string) $item->id, $requestedUnitPrices);
+                if ($hasUnitOverride) {
+                    $rawUnit = $requestedUnitPrices[$item->id] ?? $requestedUnitPrices[(string) $item->id];
+                    $unit = (int) round((float) $rawUnit);
+                    if ($unit < 0) {
+                        throw new InvalidArgumentException('エンドユーザー価格は0以上で入力してください。');
+                    }
+                }
 
                 ContractItem::query()->create([
                     'contract_id' => $contract->id,
                     'item_id' => $item->id,
-                    'unit_price' => (int) $unit,
-                    'partition_price' => (int) $partition,
+                    'unit_price' => $unit,
+                    'partition_price' => $partition,
+                    'standard_partition_price' => $standardPartition,
                     'tax_rate' => (int) ($item->tax_rate ?? 10),
                     'price_locked' => false,
                 ]);
             }
 
-            $this->recordStatus($contract, null, ContractStatus::Draft, $actor, '下書き作成');
-            $this->audit($actor, 'contract.create', $contract);
+            $this->recordStatus($contract, null, ContractStatus::Draft, $actor, $specialRequested ? 'オーダー作成（特価申請）' : 'オーダー作成');
+            $this->audit($actor, 'contract.create', $contract, [
+                'special_price_requested' => $specialRequested,
+            ]);
 
             return $contract->load('items.item');
         });
+
+        if ($specialRequested) {
+            $this->submitPriceApproval($actor, $contract->fresh(['items.item', 'owningBp.parent']));
+        }
+
+        return $contract->fresh(['items.item', 'owningBp']);
     }
 
     public function deleteDraft(User $actor, Contract $contract): void
@@ -127,7 +194,7 @@ class ContractService
         ]);
 
         if ($contract->status !== ContractStatus::Draft) {
-            throw new InvalidArgumentException('下書き状態の契約のみ削除できます。');
+            throw new InvalidArgumentException('オーダー作成中の契約のみ削除できます。');
         }
 
         $code = $contract->code;
@@ -155,9 +222,38 @@ class ContractService
         );
     }
 
-    public function updateDraftPrices(User $actor, Contract $contract, array $pricesByContractItemId): Contract
+    /**
+     * @param  array<int|string, array{unit_price?: int|string, partition_price?: int|string}>  $pricesByContractItemId
+     * @param  array{special_price_requested?: bool, special_price_reason?: ?string}  $options
+     */
+    public function updateDraftPrices(User $actor, Contract $contract, array $pricesByContractItemId, array $options = []): Contract
     {
         $this->assertEditableDraft($actor, $contract);
+        $contract->loadMissing('items');
+
+        $specialRequested = (bool) ($options['special_price_requested'] ?? false);
+        $specialReason = trim((string) ($options['special_price_reason'] ?? ''));
+        $partitionTouched = false;
+
+        foreach ($pricesByContractItemId as $contractItemId => $row) {
+            /** @var ContractItem|null $line */
+            $line = $contract->items->firstWhere('id', (int) $contractItemId);
+            if ($line === null || ! array_key_exists('partition_price', $row)) {
+                continue;
+            }
+            $nextPartition = (int) round((float) $row['partition_price']);
+            if ($nextPartition !== (int) $line->partition_price) {
+                $partitionTouched = true;
+                break;
+            }
+        }
+
+        if ($partitionTouched && ! $specialRequested) {
+            throw new InvalidArgumentException('仕切りを変更する場合は特価申請が必要です。');
+        }
+        if ($specialRequested && $specialReason === '') {
+            throw new InvalidArgumentException('特価申請理由を入力してください。');
+        }
 
         foreach ($pricesByContractItemId as $contractItemId => $row) {
             /** @var ContractItem|null $line */
@@ -171,21 +267,39 @@ class ContractService
             if (isset($row['unit_price'])) {
                 $line->unit_price = (int) round((float) $row['unit_price']);
             }
-            if (isset($row['partition_price'])) {
+            if ($specialRequested && array_key_exists('partition_price', $row)) {
                 $line->partition_price = (int) round((float) $row['partition_price']);
             }
             $line->save();
         }
 
-        $this->audit($actor, 'contract.prices.update', $contract);
+        if ($specialRequested) {
+            $contract->special_price_requested = true;
+            $contract->special_price_reason = $specialReason;
+            $contract->save();
+        }
+
+        $this->audit($actor, 'contract.prices.update', $contract, [
+            'special_price' => $specialRequested,
+        ]);
 
         return $contract->fresh(['items.item']);
     }
 
-    public function submitPriceApproval(User $actor, Contract $contract): Application
+    public function submitPriceApproval(User $actor, Contract $contract, ?string $specialPriceReason = null): Application
     {
         $this->assertEditableDraft($actor, $contract);
         $contract->loadMissing(['owningBp.parent', 'items']);
+
+        if ($specialPriceReason !== null) {
+            $reason = trim($specialPriceReason);
+            if ($reason === '') {
+                throw new InvalidArgumentException('特価申請理由を入力してください。');
+            }
+            $contract->special_price_requested = true;
+            $contract->special_price_reason = $reason;
+            $contract->save();
+        }
 
         $parent = $contract->owningBp?->parent;
         if ($parent === null) {
@@ -196,6 +310,7 @@ class ContractService
                     $line->save();
                 }
                 $this->transition($contract, ContractStatus::Approved, $actor, 'ルートBPのため価格自己確定');
+                $this->priceLayers->syncForContract($contract->fresh(['owningBp', 'items.item']));
                 $this->issueDocumentsForContract($contract);
 
                 return Application::query()->create([
@@ -204,7 +319,11 @@ class ContractService
                     'from_bp_id' => $contract->owning_bp_id,
                     'to_bp_id' => $contract->owning_bp_id,
                     'status' => ApplicationStatus::Approved,
-                    'payload_json' => ['auto' => true],
+                    'payload_json' => [
+                        'auto' => true,
+                        'special_price' => (bool) $contract->special_price_requested,
+                        'special_price_reason' => $contract->special_price_reason,
+                    ],
                     'amount' => $contract->items->sum(fn ($i) => (float) $i->partition_price),
                     'decided_by_user_id' => $actor->id,
                     'decided_at' => now(),
@@ -213,26 +332,53 @@ class ContractService
         }
 
         $amount = $contract->items->sum(fn ($i) => (float) $i->partition_price);
+        $isSpecial = (bool) $contract->special_price_requested;
+        $resume = $this->rejectedChainResumePoint($contract);
+        $chainPayload = $resume['chain'] ?? $this->buildApprovalChainPayload($contract);
+        $toBpId = $resume['to_bp_id'] ?? (int) $parent->id;
 
-        return DB::transaction(function () use ($actor, $contract, $parent, $amount) {
+        return DB::transaction(function () use ($actor, $contract, $toBpId, $amount, $isSpecial, $chainPayload, $resume) {
             $application = Application::query()->create([
                 'type' => ApplicationType::PriceApproval,
                 'contract_id' => $contract->id,
                 'from_bp_id' => $contract->owning_bp_id,
-                'to_bp_id' => $parent->id,
+                'to_bp_id' => $toBpId,
                 'status' => ApplicationStatus::Pending,
                 'payload_json' => [
-                    'items' => $contract->items->map(fn (ContractItem $line) => [
-                        'contract_item_id' => $line->id,
-                        'unit_price' => (string) $line->unit_price,
-                        'partition_price' => (string) $line->partition_price,
-                    ])->all(),
+                    'special_price' => $isSpecial,
+                    'special_price_reason' => $isSpecial ? $contract->special_price_reason : null,
+                    'chain' => $chainPayload,
+                    'resumed_from_application_id' => $resume['rejected_application_id'] ?? null,
+                    'items' => $contract->items->map(function (ContractItem $line) {
+                        $standard = $line->standard_partition_price !== null
+                            ? (int) $line->standard_partition_price
+                            : (int) $line->partition_price;
+                        $requested = (int) $line->partition_price;
+
+                        return [
+                            'contract_item_id' => $line->id,
+                            'item_id' => $line->item_id,
+                            'unit_price' => (string) $line->unit_price,
+                            'partition_price' => (string) $requested,
+                            'standard_partition_price' => (string) $standard,
+                            'partition_diff' => $standard - $requested,
+                        ];
+                    })->all(),
                 ],
                 'amount' => $amount,
             ]);
 
-            $this->transition($contract, ContractStatus::PendingPriceApproval, $actor, '価格承認申請');
-            $this->audit($actor, 'contract.price_approval.submit', $contract, ['application_id' => $application->id]);
+            $note = $isSpecial ? '特価申請（価格承認）' : '価格承認申請';
+            if (($resume['rejected_application_id'] ?? null) !== null) {
+                $note .= '（却下後の再申請 '.$application->approvalProgressLabel().'）';
+            }
+            $this->transition($contract, ContractStatus::PendingPriceApproval, $actor, $note);
+            $this->audit($actor, 'contract.price_approval.submit', $contract, [
+                'application_id' => $application->id,
+                'special_price' => $isSpecial,
+                'chain' => $chainPayload,
+                'resumed' => ($resume['rejected_application_id'] ?? null) !== null,
+            ]);
 
             return $application;
         });
@@ -244,7 +390,7 @@ class ContractService
             throw new InvalidArgumentException('処理可能な価格承認申請ではありません。');
         }
 
-        $application->loadMissing('contract.items');
+        $application->loadMissing(['contract.items.item', 'contract.owningBp']);
         $contract = $application->contract;
 
         $this->authorization->authorize($actor, 'contract.approve', [
@@ -268,21 +414,154 @@ class ContractService
             $application->decided_at = now();
             $application->save();
 
-            if ($approve) {
-                foreach ($contract->items as $line) {
-                    $line->price_locked = true;
-                    $line->save();
-                }
-                $this->transition($contract, ContractStatus::Approved, $actor, $note ?? '価格承認');
-                $this->issueDocumentsForContract($contract);
-            } else {
+            if (! $approve) {
                 $this->transition($contract, ContractStatus::Draft, $actor, $note ?? '価格却下');
+                $this->audit($actor, 'contract.price_approval.reject', $contract);
+
+                return $application->fresh();
             }
 
-            $this->audit($actor, $approve ? 'contract.price_approval.approve' : 'contract.price_approval.reject', $contract);
+            $next = $this->nextApprovalRecipient($application);
+            if ($next !== null) {
+                $forwarded = $this->forwardPriceApproval($application, $next);
+                $this->transition(
+                    $contract,
+                    ContractStatus::PendingPriceApproval,
+                    $actor,
+                    $note ?? '価格承認（上位BPへ回付 '.$forwarded->approvalProgressLabel().'）'
+                );
+                $this->audit($actor, 'contract.price_approval.approve', $contract, [
+                    'application_id' => $application->id,
+                    'forwarded_application_id' => $forwarded->id,
+                    'chain' => $forwarded->payload_json['chain'] ?? null,
+                ]);
+
+                return $forwarded;
+            }
+
+            foreach ($contract->items as $line) {
+                $line->price_locked = true;
+                $line->save();
+            }
+            $this->transition($contract, ContractStatus::Approved, $actor, $note ?? '価格承認');
+            $this->priceLayers->syncForContract($contract->fresh(['owningBp', 'items.item']));
+            $this->issueDocumentsForContract($contract);
+            $this->audit($actor, 'contract.price_approval.approve', $contract, [
+                'application_id' => $application->id,
+            ]);
 
             return $application->fresh();
         });
+    }
+
+    /**
+     * 管理者登録（カタログ）品目を含む場合はルートまで連鎖承認する。
+     */
+    private function requiresRootApprovalChain(Contract $contract): bool
+    {
+        $contract->loadMissing('items.item');
+
+        return $contract->items->contains(
+            fn (ContractItem $line) => $line->item !== null && $line->item->owning_bp_id === null
+        );
+    }
+
+    /**
+     * @return array{required: bool, total: int, step: int, origin_bp_id: int}
+     */
+    private function buildApprovalChainPayload(Contract $contract): array
+    {
+        $contract->loadMissing('owningBp');
+        $required = $this->requiresRootApprovalChain($contract);
+        $total = 1;
+        if ($required && $contract->owningBp) {
+            $total = max(1, $this->hierarchy->ancestors($contract->owningBp, includeSelf: false)->count());
+        }
+
+        return [
+            'required' => $required,
+            'total' => $total,
+            'step' => 1,
+            'origin_bp_id' => (int) $contract->owning_bp_id,
+        ];
+    }
+
+    /**
+     * 連鎖承認で却下された場合、再申請は却下したBPの段階から再開する。
+     *
+     * @return array{to_bp_id: int, chain: array{required: bool, total: int, step: int, origin_bp_id: int}, rejected_application_id: int}|null
+     */
+    private function rejectedChainResumePoint(Contract $contract): ?array
+    {
+        $rejected = Application::query()
+            ->where('contract_id', $contract->id)
+            ->where('type', ApplicationType::PriceApproval->value)
+            ->where('status', ApplicationStatus::Rejected->value)
+            ->latest('id')
+            ->first();
+
+        if ($rejected === null) {
+            return null;
+        }
+
+        $chain = is_array($rejected->payload_json) ? ($rejected->payload_json['chain'] ?? null) : null;
+        if (! is_array($chain) || empty($chain['required'])) {
+            return null;
+        }
+
+        $step = max(1, (int) ($chain['step'] ?? 1));
+        $total = max($step, (int) ($chain['total'] ?? 1));
+
+        return [
+            'to_bp_id' => (int) $rejected->to_bp_id,
+            'chain' => [
+                'required' => true,
+                'total' => $total,
+                'step' => $step,
+                'origin_bp_id' => (int) ($chain['origin_bp_id'] ?? $contract->owning_bp_id),
+            ],
+            'rejected_application_id' => (int) $rejected->id,
+        ];
+    }
+
+    private function nextApprovalRecipient(Application $application): ?BusinessPartner
+    {
+        if (! $application->requiresApprovalChain()) {
+            return null;
+        }
+
+        $progress = $application->approvalProgress();
+        if ($progress !== null && $progress['step'] >= $progress['total']) {
+            return null;
+        }
+
+        $current = BusinessPartner::query()->find($application->to_bp_id);
+        $parent = $current?->parent;
+        if ($parent === null) {
+            return null;
+        }
+
+        return $parent;
+    }
+
+    private function forwardPriceApproval(Application $approved, BusinessPartner $nextTo): Application
+    {
+        $payload = is_array($approved->payload_json) ? $approved->payload_json : [];
+        $chain = is_array($payload['chain'] ?? null) ? $payload['chain'] : [];
+        $chain['step'] = (int) ($chain['step'] ?? 1) + 1;
+        $chain['total'] = max((int) ($chain['total'] ?? 1), $chain['step']);
+        $payload['chain'] = $chain;
+        $payload['forwarded_from_application_id'] = $approved->id;
+
+        return Application::query()->create([
+            'type' => ApplicationType::PriceApproval,
+            'contract_id' => $approved->contract_id,
+            'from_bp_id' => $approved->from_bp_id,
+            'to_bp_id' => $nextTo->id,
+            'status' => ApplicationStatus::Pending,
+            'payload_json' => $payload,
+            'amount' => $approved->amount,
+        ]);
     }
 
     public function submitPriceChange(User $actor, Contract $contract, array $changesByContractItemId): Application
@@ -380,6 +659,7 @@ class ContractService
                     $line->price_locked = true;
                     $line->save();
                 }
+                $this->priceLayers->syncForContract($contract->fresh(['owningBp', 'items.item']));
             }
 
             $this->audit(
@@ -445,7 +725,7 @@ class ContractService
             throw new InvalidArgumentException('サービス提供開始の契約のみ承認済へ戻せます。');
         }
 
-        if (Invoice::query()->where('contract_id', $contract->id)->exists()) {
+        if (Invoice::query()->where('contract_id', $contract->id)->where('status', '!=', 'withdrawn')->exists()) {
             throw new InvalidArgumentException('請求が発行済みのためステータスを戻せません。');
         }
 
@@ -560,6 +840,7 @@ class ContractService
             'body' => $body,
         ]);
 
+        $this->markMessagesRead($actor, $contract->fresh());
         $this->audit($actor, 'contract.message.create', $contract, ['message_id' => $message->id]);
 
         return $message;
@@ -568,6 +849,227 @@ class ContractService
     public function canPostMessages(Contract $contract): bool
     {
         return ! in_array($contract->status, [ContractStatus::Activated, ContractStatus::Cancelled], true);
+    }
+
+    public function markMessagesRead(User $actor, Contract $contract): void
+    {
+        $lastMessageId = $contract->messages()->max('id');
+
+        ContractMessageRead::query()->updateOrCreate(
+            [
+                'contract_id' => $contract->id,
+                'user_id' => $actor->id,
+            ],
+            [
+                'last_read_at' => now(),
+                'last_read_message_id' => $lastMessageId,
+            ],
+        );
+    }
+
+    public function isMessagesUnread(User $actor, Contract $contract): bool
+    {
+        $lastMessage = $contract->relationLoaded('messages')
+            ? $contract->messages->sortByDesc('id')->first()
+            : $contract->messages()->latest('id')->first();
+
+        if ($lastMessage === null || (int) $lastMessage->user_id === (int) $actor->id) {
+            return false;
+        }
+
+        $read = ContractMessageRead::query()
+            ->where('contract_id', $contract->id)
+            ->where('user_id', $actor->id)
+            ->first();
+
+        if ($read === null || $read->last_read_message_id === null) {
+            return true;
+        }
+
+        return (int) $lastMessage->id > (int) $read->last_read_message_id;
+    }
+
+    /**
+     * @param  list<int>|null  $owningBpIds  null = 全契約（管理者）
+     */
+    public function unreadMessageContractCount(User $actor, ?array $owningBpIds = null, ?int $customerId = null): int
+    {
+        $query = Contract::query();
+
+        if ($customerId !== null) {
+            $query->where('customer_id', $customerId);
+        } elseif ($owningBpIds !== null) {
+            $query->whereIn('owning_bp_id', $owningBpIds);
+        }
+
+        $ids = $query->pluck('id');
+        if ($ids->isEmpty()) {
+            return 0;
+        }
+
+        $count = 0;
+        $contracts = Contract::query()
+            ->whereIn('id', $ids)
+            ->with([
+                'messages' => fn ($q) => $q->latest('id')->limit(1),
+            ])
+            ->get();
+
+        foreach ($contracts as $contract) {
+            if ($this->isMessagesUnread($actor, $contract)) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function unreadMessageContractIds(User $actor, ?array $owningBpIds = null, ?int $customerId = null): array
+    {
+        $query = Contract::query();
+
+        if ($customerId !== null) {
+            $query->where('customer_id', $customerId);
+        } elseif ($owningBpIds !== null) {
+            $query->whereIn('owning_bp_id', $owningBpIds);
+        }
+
+        $ids = [];
+        foreach ($query->with(['messages' => fn ($q) => $q->latest('id')->limit(1)])->get() as $contract) {
+            if ($this->isMessagesUnread($actor, $contract)) {
+                $ids[] = (int) $contract->id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  array{
+     *   auto_invoice_enabled?: bool,
+     *   billing_suspended?: bool,
+     *   end_user_billing_disabled?: bool,
+     *   bill_initial_in_system?: bool,
+     *   kickback_start_year_month?: ?string,
+     *   recalc_on_price_change?: bool,
+     *   items?: array<int, array{bill_initial_in_system?: ?bool, end_user_billing_disabled?: ?bool}>
+     * }  $payload
+     */
+    public function updateBillingSettings(User $actor, Contract $contract, array $payload): Contract
+    {
+        $this->ensureContractScope($actor, $contract);
+        $this->authorization->authorize($actor, 'invoice.manage', [
+            'resource_type' => 'contract',
+            'owner_bp_id' => $contract->owning_bp_id,
+        ]);
+
+        if ($actor->user_type === UserType::Customer) {
+            throw new InvalidArgumentException('カスタマーは請求設定を変更できません。');
+        }
+
+        $contract->loadMissing(['items.item', 'owningBp']);
+
+        $changingEuContract = array_key_exists('end_user_billing_disabled', $payload)
+            && (bool) $payload['end_user_billing_disabled'] !== (bool) $contract->end_user_billing_disabled;
+        if ($changingEuContract) {
+            $this->assertCanToggleEndUserBilling($actor, $contract, null);
+        }
+
+        return DB::transaction(function () use ($actor, $contract, $payload) {
+            if (array_key_exists('auto_invoice_enabled', $payload)) {
+                $contract->auto_invoice_enabled = (bool) $payload['auto_invoice_enabled'];
+            }
+            if (array_key_exists('billing_suspended', $payload)) {
+                $contract->billing_suspended = (bool) $payload['billing_suspended'];
+            }
+            if (array_key_exists('end_user_billing_disabled', $payload)) {
+                $contract->end_user_billing_disabled = (bool) $payload['end_user_billing_disabled'];
+            }
+            if (array_key_exists('bill_initial_in_system', $payload)) {
+                $contract->bill_initial_in_system = (bool) $payload['bill_initial_in_system'];
+            }
+            if (array_key_exists('recalc_on_price_change', $payload)) {
+                $contract->recalc_on_price_change = (bool) $payload['recalc_on_price_change'];
+            }
+            if (array_key_exists('kickback_start_year_month', $payload)) {
+                $ym = $payload['kickback_start_year_month'];
+                if ($ym === null || $ym === '') {
+                    $contract->kickback_start_year_month = null;
+                } else {
+                    $contract->kickback_start_year_month = $this->normalizeYearMonth((string) $ym);
+                }
+            }
+            $contract->save();
+
+            $itemPayloads = $payload['items'] ?? [];
+            foreach ($itemPayloads as $contractItemId => $itemData) {
+                /** @var ContractItem|null $line */
+                $line = $contract->items->firstWhere('id', (int) $contractItemId);
+                if (! $line) {
+                    continue;
+                }
+
+                if (array_key_exists('end_user_billing_disabled', $itemData)) {
+                    $raw = $itemData['end_user_billing_disabled'];
+                    $next = $raw === '' || $raw === null ? null : (bool) $raw;
+                    if ($next !== $line->end_user_billing_disabled) {
+                        $this->assertCanToggleEndUserBilling($actor, $contract, $line);
+                        $line->end_user_billing_disabled = $next;
+                    }
+                }
+                if (array_key_exists('bill_initial_in_system', $itemData)) {
+                    $raw = $itemData['bill_initial_in_system'];
+                    $line->bill_initial_in_system = $raw === '' || $raw === null ? null : (bool) $raw;
+                }
+                $line->save();
+            }
+
+            $this->audit($actor, 'contract.billing.update', $contract, [
+                'auto_invoice_enabled' => $contract->auto_invoice_enabled,
+                'billing_suspended' => $contract->billing_suspended,
+                'end_user_billing_disabled' => $contract->end_user_billing_disabled,
+            ]);
+
+            return $contract->fresh(['items.item', 'owningBp']);
+        });
+    }
+
+    private function assertCanToggleEndUserBilling(User $actor, Contract $contract, ?ContractItem $line): void
+    {
+        if ($actor->user_type === UserType::Admin) {
+            return;
+        }
+
+        if ($actor->user_type !== UserType::Bp || $actor->businessPartner === null) {
+            throw new InvalidArgumentException('EU請求設定を変更する権限がありません。');
+        }
+
+        $actorBp = $actor->businessPartner;
+
+        if ($line === null) {
+            $contract->loadMissing('owningBp');
+            if ($contract->owningBp && $this->hierarchy->isSelfOrDescendant($actorBp, $contract->owningBp)) {
+                return;
+            }
+
+            throw new InvalidArgumentException('管理BPまたはその上位BPのみ契約のEU請求を変更できます。');
+        }
+
+        $line->loadMissing('item');
+        $itemOwnerId = $line->item?->owning_bp_id;
+        if ($itemOwnerId === null) {
+            throw new InvalidArgumentException('管理者品目のEU請求設定は管理者のみ変更できます。');
+        }
+
+        $itemOwner = BusinessPartner::query()->find($itemOwnerId);
+        if ($itemOwner && $this->hierarchy->isSelfOrDescendant($actorBp, $itemOwner)) {
+            return;
+        }
+
+        throw new InvalidArgumentException('品目管理者またはその上位BPのみ明細のEU請求を変更できます。');
     }
 
     private function normalizeYearMonth(string $yearMonth): string
@@ -671,51 +1173,17 @@ class ContractService
             throw new InvalidArgumentException('承認後の契約のみデータを登録できます。');
         }
 
-        DB::transaction(function () use ($contractItem, $rows) {
+        $normalized = $this->normalizeDataRows($rows);
+
+        DB::transaction(function () use ($contractItem, $normalized) {
             $contractItem->dataRows()->delete();
-            foreach (array_values($rows) as $index => $row) {
-                $value = trim((string) ($row['value'] ?? ''));
-                if ($value === '') {
-                    continue;
-                }
-
-                $fieldId = $row['data_field_name_id'] ?? null;
-                $name = trim((string) ($row['name'] ?? ''));
-                $replaceCode = trim((string) ($row['replace_code'] ?? ''));
-
-                if ($fieldId) {
-                    $master = DataFieldName::query()->whereKey($fieldId)->where('is_active', true)->first();
-                    if ($master) {
-                        $name = $master->name;
-                        $fieldId = $master->id;
-                        $replaceCode = (string) ($master->replace_code ?? '');
-                    } else {
-                        $fieldId = null;
-                    }
-                }
-
-                if ($name === '') {
-                    continue;
-                }
-
-                if ($replaceCode === '') {
-                    throw new InvalidArgumentException("「{$name}」の置換コードを入力してください。");
-                }
-
-                if (! preg_match(ReservedReplaceCodes::pattern(), $replaceCode)) {
-                    throw new InvalidArgumentException("置換コード「{$replaceCode}」の形式が不正です。");
-                }
-
-                if (ReservedReplaceCodes::isReserved($replaceCode)) {
-                    throw new InvalidArgumentException("置換コード「{$replaceCode}」は予約語のため使用できません。");
-                }
-
+            foreach ($normalized as $index => $row) {
                 ContractItemData::query()->create([
                     'contract_item_id' => $contractItem->id,
-                    'data_field_name_id' => $fieldId,
-                    'name' => $name,
-                    'replace_code' => $replaceCode,
-                    'value' => $value,
+                    'data_field_name_id' => $row['data_field_name_id'],
+                    'name' => $row['name'],
+                    'replace_code' => $row['replace_code'],
+                    'value' => $row['value'],
                     'sort_order' => $index,
                 ]);
             }
@@ -723,7 +1191,101 @@ class ContractService
 
         $this->audit($actor, 'contract.data.upsert', $contractItem->contract, [
             'contract_item_id' => $contractItem->id,
+            'row_count' => count($normalized),
         ]);
+    }
+
+    public function upsertContractData(User $actor, Contract $contract, array $rows): void
+    {
+        $this->ensureContractScope($actor, $contract);
+        $this->authorization->authorize($actor, 'contract.create', [
+            'resource_type' => 'contract',
+            'owner_bp_id' => $contract->owning_bp_id,
+        ]);
+
+        if (! in_array($contract->status, [ContractStatus::Approved, ContractStatus::Activated], true)) {
+            throw new InvalidArgumentException('承認後の契約のみデータを登録できます。');
+        }
+
+        $normalized = $this->normalizeDataRows($rows);
+
+        DB::transaction(function () use ($contract, $normalized) {
+            $contract->dataRows()->delete();
+            foreach ($normalized as $index => $row) {
+                ContractData::query()->create([
+                    'contract_id' => $contract->id,
+                    'data_field_name_id' => $row['data_field_name_id'],
+                    'name' => $row['name'],
+                    'replace_code' => $row['replace_code'],
+                    'value' => $row['value'],
+                    'sort_order' => $index,
+                ]);
+            }
+        });
+
+        $this->audit($actor, 'contract.common_data.upsert', $contract, [
+            'row_count' => count($normalized),
+        ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array{data_field_name_id: int|null, name: string, replace_code: string, value: string}>
+     */
+    private function normalizeDataRows(array $rows): array
+    {
+        $normalized = [];
+
+        foreach (array_values($rows) as $row) {
+            $value = trim((string) ($row['value'] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+
+            $fieldId = $row['data_field_name_id'] ?? null;
+            $name = trim((string) ($row['name'] ?? ''));
+            $replaceCode = trim((string) ($row['replace_code'] ?? ''));
+
+            if ($fieldId) {
+                $master = DataFieldName::query()->whereKey($fieldId)->where('is_active', true)->first();
+                if ($master) {
+                    $name = $master->name;
+                    $fieldId = $master->id;
+                    $replaceCode = (string) ($master->replace_code ?? '');
+                } else {
+                    $fieldId = null;
+                }
+            }
+
+            if ($name === '') {
+                continue;
+            }
+
+            if ($replaceCode === '') {
+                throw new InvalidArgumentException("「{$name}」の置換コードを入力してください。");
+            }
+
+            if (! preg_match(ReservedReplaceCodes::pattern(), $replaceCode)) {
+                throw new InvalidArgumentException("置換コード「{$replaceCode}」の形式が不正です。");
+            }
+
+            if (ReservedReplaceCodes::isReserved($replaceCode)) {
+                throw new InvalidArgumentException("置換コード「{$replaceCode}」は予約語のため使用できません。");
+            }
+
+            $normalized[] = [
+                'data_field_name_id' => $fieldId ? (int) $fieldId : null,
+                'name' => $name,
+                'replace_code' => $replaceCode,
+                'value' => $value,
+            ];
+        }
+
+        if (count($normalized) > self::MAX_DATA_ROWS) {
+            throw new InvalidArgumentException('データは最大'.self::MAX_DATA_ROWS.'行までです。');
+        }
+
+        return $normalized;
     }
 
     public function addItemDocument(User $actor, Item $item, string $title, UploadedFile $file): ItemDocument
@@ -834,7 +1396,7 @@ class ContractService
      */
     public function issueDocumentsForContract(Contract $contract): array
     {
-        $contract->loadMissing('items.item.documents', 'items.documents', 'items.dataRows.dataFieldName', 'customer', 'site', 'owningBp');
+        $contract->loadMissing('items.item.documents', 'items.documents', 'items.dataRows.dataFieldName', 'dataRows.dataFieldName', 'customer', 'site', 'owningBp');
         $owningBpId = (int) $contract->owning_bp_id;
         $templateCount = 0;
         $generated = 0;
@@ -953,7 +1515,7 @@ class ContractService
         }
 
         if ($contract->status !== ContractStatus::Draft) {
-            throw new InvalidArgumentException('下書き状態の契約のみ編集できます。');
+            throw new InvalidArgumentException('オーダー作成中の契約のみ編集できます。');
         }
     }
 

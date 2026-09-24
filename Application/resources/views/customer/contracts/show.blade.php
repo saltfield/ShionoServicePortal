@@ -5,10 +5,11 @@
 @section('logout_action', route('customer.logout'))
 
 @section('content')
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">契約詳細</h1>
-        <a href="{{ route('customer.contracts.index') }}" class="btn btn-outline-secondary btn-sm">一覧へ</a>
-    </div>
+    @include('partials.breadcrumb', [
+        'crumbs' => [['label' => '契約一覧', 'url' => route('customer.contracts.index')]],
+        'current' => '契約詳細',
+    ])
+    <h1 class="h3 mb-3">契約詳細</h1>
 
     <dl class="row">
         <dt class="col-sm-3">契約番号</dt><dd class="col-sm-9"><code>{{ $contract->code }}</code></dd>
@@ -18,6 +19,18 @@
     </dl>
 
     <h2 class="h5">明細・データ・ドキュメント</h2>
+    @if (($contract->dataRows ?? collect())->isNotEmpty())
+        <div class="card mb-3">
+            <div class="card-body">
+                <h3 class="h6">契約共通データ</h3>
+                <ul class="mb-0">
+                    @foreach ($contract->dataRows as $row)
+                        <li><strong>{{ $row->name }}</strong>: {{ $row->value }}</li>
+                    @endforeach
+                </ul>
+            </div>
+        </div>
+    @endif
     @foreach ($contract->items as $line)
         <div class="card mb-3">
             <div class="card-body">
