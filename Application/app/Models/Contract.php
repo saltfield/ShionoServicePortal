@@ -131,7 +131,7 @@ class Contract extends Model
         }
 
         return \Illuminate\Support\Carbon::createFromFormat('Ym', $first)
-            ->addMonthsNoOverflow(5)
+            ->addMonthsNoOverflow(6)
             ->format('Ym');
     }
 }

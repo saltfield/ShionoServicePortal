@@ -227,11 +227,15 @@ foreach (
                     Route::get('invoices', [InvoiceController::class, 'index'])->name('invoices.index');
                     Route::get('invoices/{invoice}', [InvoiceController::class, 'show'])->name('invoices.show');
                     Route::post('invoices/{invoice}/mark-paid', [InvoiceController::class, 'markPaid'])->name('invoices.mark-paid');
+                    Route::put('invoices/{invoice}/paid-amount', [InvoiceController::class, 'updatePaidAmount'])->name('invoices.paid-amount');
                     Route::post('invoices/{invoice}/cancel', [InvoiceController::class, 'cancel'])->name('invoices.cancel');
                     Route::get('kickbacks', [KickbackInvoiceController::class, 'index'])->name('kickbacks.index');
                     Route::get('kickbacks/{kickback}', [KickbackInvoiceController::class, 'show'])->name('kickbacks.show');
                     Route::post('kickbacks/{kickback}/mark-paid', [KickbackInvoiceController::class, 'markPaid'])->name('kickbacks.mark-paid');
+                    Route::put('kickbacks/{kickback}/paid-amount', [KickbackInvoiceController::class, 'updatePaidAmount'])->name('kickbacks.paid-amount');
                     Route::post('kickbacks/{kickback}/withdraw', [KickbackInvoiceController::class, 'withdraw'])->name('kickbacks.withdraw');
+                    Route::put('kickbacks/{kickback}/amounts', [KickbackInvoiceController::class, 'adjustAmounts'])->name('kickbacks.amounts');
+                    Route::post('kickbacks/{kickback}/regenerate', [KickbackInvoiceController::class, 'regenerate'])->name('kickbacks.regenerate');
                     Route::get('billing-batch', [BillingBatchSettingsController::class, 'edit'])->name('billing-batch.edit');
                     Route::put('billing-batch', [BillingBatchSettingsController::class, 'update'])->name('billing-batch.update');
                     Route::post('billing-batch/run', [BillingBatchSettingsController::class, 'run'])->name('billing-batch.run');
@@ -344,6 +348,7 @@ foreach (
                     Route::get('kickbacks/{kickback}', [BpKickbackInvoiceController::class, 'show'])->name('kickbacks.show');
                     Route::post('kickbacks/{kickback}/mark-paid', [BpKickbackInvoiceController::class, 'markPaid'])->name('kickbacks.mark-paid');
                     Route::post('kickbacks/{kickback}/withdraw', [BpKickbackInvoiceController::class, 'withdraw'])->name('kickbacks.withdraw');
+                    Route::post('kickbacks/{kickback}/regenerate', [BpKickbackInvoiceController::class, 'regenerate'])->name('kickbacks.regenerate');
 
                     Route::get('tickets/received', [BpInquiryController::class, 'received'])->name('tickets.received');
                     Route::get('tickets/issued', [BpInquiryController::class, 'issued'])->name('tickets.issued');

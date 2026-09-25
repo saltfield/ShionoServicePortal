@@ -23,6 +23,7 @@ class InvoiceController extends Controller
             'invoices' => $billing->visibleQuery($actor)->latest('id')->paginate(20),
             'routePrefix' => 'admin',
             'canManage' => true,
+            'canEditPaidAmount' => true,
         ]);
     }
 
@@ -33,21 +34,41 @@ class InvoiceController extends Controller
         $billing->assertVisible($actor, $invoice);
 
         return view('admin.invoices.show', [
-            'invoice' => $invoice->load(['lines', 'customer', 'owningBp', 'issuerBp', 'contract']),
+            'invoice' => $invoice->load(['lines', 'customer', 'owningBp', 'issuerBp', 'contract', 'kickbacks']),
             'routePrefix' => 'admin',
             'canManage' => true,
+            'canEditPaidAmount' => true,
         ]);
     }
 
     public function markPaid(Request $request, Invoice $invoice, BillingService $billing): RedirectResponse
     {
+        $validated = $request->validate([
+            'paid_amount' => ['required', 'integer', 'min:0'],
+        ]);
+
         try {
-            $billing->markPaid($request->user('admin'), $invoice);
+            $billing->markPaid($request->user('admin'), $invoice, (int) $validated['paid_amount']);
         } catch (InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['invoice' => $exception->getMessage()]);
         }
 
         return back()->with('status', '入金済に更新しました。');
+    }
+
+    public function updatePaidAmount(Request $request, Invoice $invoice, BillingService $billing): RedirectResponse
+    {
+        $validated = $request->validate([
+            'paid_amount' => ['required', 'integer', 'min:0'],
+        ]);
+
+        try {
+            $billing->updatePaidAmount($request->user('admin'), $invoice, (int) $validated['paid_amount']);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['invoice' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', '入金金額を更新し、キックバックを再計算しました。');
     }
 
     public function cancel(Request $request, Invoice $invoice, BillingService $billing): RedirectResponse

@@ -15,6 +15,7 @@ use App\Domains\Iam\Services\RbacService;
 use App\Http\Controllers\Concerns\ConfirmsContractDeletion;
 use App\Http\Controllers\Concerns\ConfirmsContractItemDocumentDeletion;
 use App\Http\Controllers\Concerns\DownloadsContractItemDocuments;
+use App\Http\Controllers\Concerns\FiltersContractsIndex;
 use App\Http\Controllers\Concerns\OrdersContractIndexQuery;
 use App\Http\Controllers\Concerns\ResolvesContractShowTab;
 use App\Http\Controllers\Controller;
@@ -40,6 +41,7 @@ class ContractController extends Controller
     use ConfirmsContractDeletion;
     use ConfirmsContractItemDocumentDeletion;
     use DownloadsContractItemDocuments;
+    use FiltersContractsIndex;
     use OrdersContractIndexQuery;
     use ResolvesContractShowTab;
 
@@ -52,6 +54,7 @@ class ContractController extends Controller
 
         $status = $this->validatedStatusFilter($request);
         $unreadOnly = $request->boolean('unread_messages');
+        $filters = $this->contractIndexFilters($request);
         $ids = $hierarchy->descendantIdsIncludingSelf($actorBp);
         $contracts = Contract::query()
             ->with(['customer', 'owningBp', 'site'])
@@ -62,6 +65,7 @@ class ContractController extends Controller
                 $query->whereIn('id', $unreadIds === [] ? [0] : $unreadIds);
             });
 
+        $contracts = $this->applyContractIndexFilters($contracts, $filters);
         $contracts = $this->orderContractIndexQuery($contracts, $status)
             ->paginate(20)
             ->withQueryString();
@@ -71,6 +75,7 @@ class ContractController extends Controller
             'routePrefix' => 'bp',
             'statusFilter' => $status,
             'unreadMessagesFilter' => $unreadOnly,
+            'filters' => $filters,
         ]);
     }
 

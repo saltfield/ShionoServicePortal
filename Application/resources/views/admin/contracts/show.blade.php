@@ -551,7 +551,7 @@
                             pattern="\d{6}"
                             placeholder="{{ $contract->effectiveKickbackStartYearMonth() ?? '例: 202702' }}"
                         >
-                        <div class="form-text">未設定時の開始月: {{ $contract->effectiveKickbackStartYearMonth() ?? '—' }}</div>
+                        <div class="form-text">未設定時は初回請求月の6ヶ月後（対象請求の6ヶ月後バッチ）。現在の開始月: {{ $contract->effectiveKickbackStartYearMonth() ?? '—' }}</div>
                     </div>
                 </div>
 

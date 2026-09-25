@@ -14,6 +14,7 @@ use App\Domains\Iam\Services\AuthorizationService;
 use App\Models\BusinessPartner;
 use App\Models\Contract;
 use App\Models\ContractItem;
+use App\Models\Invoice;
 use App\Models\KickbackInvoice;
 use App\Models\KickbackInvoiceLine;
 use App\Models\User;
@@ -159,11 +160,12 @@ class KickbackService
             foreach ($ordered as $layer) {
                 $partition = (int) $layer->amount;
                 $amount = $upper - $partition;
-                $key = $layer->buyer_bp_id.'|'.$layer->seller_bp_id;
+                // キックバックは上位（seller）から下位（buyer）へ支払う。
+                $key = $layer->seller_bp_id.'|'.$layer->buyer_bp_id;
                 if (! isset($edgesByPair[$key])) {
                     $edgesByPair[$key] = [
-                        'from_bp_id' => (int) $layer->buyer_bp_id,
-                        'to_bp_id' => (int) $layer->seller_bp_id,
+                        'from_bp_id' => (int) $layer->seller_bp_id,
+                        'to_bp_id' => (int) $layer->buyer_bp_id,
                         'lines' => [],
                     ];
                 }
@@ -172,8 +174,8 @@ class KickbackService
                     throw new InvalidArgumentException(sprintf(
                         'キックバック差額が負です（明細#%d 区間 %d→%d）。差額=%d（絶対値=%d）。上値=%d 仕切り=%d',
                         $line->id,
-                        $layer->buyer_bp_id,
                         $layer->seller_bp_id,
+                        $layer->buyer_bp_id,
                         $amount,
                         abs($amount),
                         $upper,
@@ -205,6 +207,9 @@ class KickbackService
     }
 
     /**
+     * バッチ請求月 M に対し、M-6 のカスタマー請求を元にキックバックを生成／更新する。
+     * 未入金でも金額0でレコードを作る。入金済なら税込入金額で按分する。
+     *
      * @return list<KickbackInvoice>
      */
     public function generateForContract(Contract $contract, string $billingYearMonth, ?User $actor = null, ?int $billingBatchRunId = null): array
@@ -226,40 +231,100 @@ class KickbackService
             return [];
         }
 
-        $contract->loadMissing(['owningBp', 'items.item', 'items.priceLayers', 'items.contract']);
-        $eligibleItems = $contract->items->filter(fn (ContractItem $line) => $this->shouldIncludeKickbackLine($line, $billingYearMonth, $contract));
+        $sourceYearMonth = Carbon::createFromFormat('Ym', $billingYearMonth)
+            ->subMonthsNoOverflow(6)
+            ->format('Ym');
+
+        $sourceInvoice = Invoice::query()
+            ->where('contract_id', $contract->id)
+            ->where('billing_year_month', $sourceYearMonth)
+            ->where('status', '!=', InvoiceStatus::Withdrawn->value)
+            ->first();
+
+        if (! $sourceInvoice) {
+            return [];
+        }
+
+        return $this->syncForSourceInvoice($sourceInvoice, $actor, $billingBatchRunId, force: false);
+    }
+
+    /**
+     * 対象カスタマー請求に紐づくキックバックを生成／再計算する。
+     *
+     * @return list<KickbackInvoice>
+     */
+    public function syncForSourceInvoice(Invoice $sourceInvoice, ?User $actor = null, ?int $billingBatchRunId = null, bool $force = false): array
+    {
+        $sourceInvoice->loadMissing(['contract.owningBp', 'contract.items.item', 'contract.items.priceLayers', 'contract.items.contract']);
+        $contract = $sourceInvoice->contract;
+        if (! $contract || $contract->status !== ContractStatus::Activated) {
+            return [];
+        }
+
+        if ($contract->end_user_billing_disabled) {
+            return [];
+        }
+
+        if ($sourceInvoice->status === InvoiceStatus::Withdrawn) {
+            return [];
+        }
+
+        $billingYearMonth = $sourceInvoice->billing_year_month;
+        $eligibleItems = $contract->items->filter(
+            fn (ContractItem $line) => $this->shouldIncludeKickbackLine($line, $billingYearMonth, $contract)
+        );
         if ($eligibleItems->isEmpty()) {
             return [];
         }
 
         $edgesByPair = $this->buildEdgesByPair($eligibleItems);
-
-        $created = [];
+        $ratio = $sourceInvoice->paymentRatio();
         $due = Carbon::createFromFormat('Ym', $billingYearMonth)->addMonthNoOverflow()->format('Ym');
 
-        return DB::transaction(function () use ($edgesByPair, $contract, $billingYearMonth, $due, $actor, $billingBatchRunId, &$created) {
+        return DB::transaction(function () use ($edgesByPair, $contract, $sourceInvoice, $billingYearMonth, $due, $actor, $billingBatchRunId, $ratio, $force) {
+            $created = [];
+
             foreach ($edgesByPair as $edge) {
                 if ($edge['lines'] === []) {
                     continue;
                 }
 
-                if (KickbackInvoice::query()
+                $scaledLines = $this->scaleEdgeLines($edge['lines'], $ratio);
+
+                $existing = KickbackInvoice::query()
                     ->where('contract_id', $contract->id)
                     ->where('from_bp_id', $edge['from_bp_id'])
                     ->where('to_bp_id', $edge['to_bp_id'])
                     ->where('billing_year_month', $billingYearMonth)
                     ->where('status', '!=', InvoiceStatus::Withdrawn->value)
-                    ->exists()) {
+                    ->first();
+
+                if ($existing) {
+                    if ($existing->status === InvoiceStatus::Paid) {
+                        $created[] = $existing->load('lines');
+
+                        continue;
+                    }
+                    if ($existing->manual_adjusted && ! $force) {
+                        $created[] = $existing->load('lines');
+
+                        continue;
+                    }
+
+                    $this->replaceKickbackAmounts($existing, $scaledLines, $billingBatchRunId, $sourceInvoice->id, clearManual: $force);
+                    $created[] = $existing->fresh('lines');
+
                     continue;
                 }
 
-                $subtotal = array_sum(array_column($edge['lines'], 'amount'));
-                $taxTotal = array_sum(array_column($edge['lines'], 'tax_amount'));
-                $total = array_sum(array_column($edge['lines'], 'amount_inclusive'));
+                $subtotal = array_sum(array_column($scaledLines, 'amount'));
+                $taxTotal = array_sum(array_column($scaledLines, 'tax_amount'));
+                $total = array_sum(array_column($scaledLines, 'amount_inclusive'));
 
                 $invoice = KickbackInvoice::query()->create([
                     'code' => $this->sequences->next(PartnerCodePrefix::Kickback),
                     'contract_id' => $contract->id,
+                    'source_invoice_id' => $sourceInvoice->id,
                     'billing_batch_run_id' => $billingBatchRunId,
                     'from_bp_id' => $edge['from_bp_id'],
                     'to_bp_id' => $edge['to_bp_id'],
@@ -270,14 +335,16 @@ class KickbackService
                     'tax_total' => $taxTotal,
                     'total' => $total,
                     'issued_at' => now(),
+                    'manual_adjusted' => false,
                 ]);
 
                 $sort = 0;
-                foreach ($edge['lines'] as $row) {
+                foreach ($scaledLines as $row) {
                     KickbackInvoiceLine::query()->create([
                         'kickback_invoice_id' => $invoice->id,
                         ...$row,
                         'sort_order' => $sort++,
+                        'is_adjustment' => false,
                     ]);
                 }
 
@@ -293,9 +360,11 @@ class KickbackService
                             'code' => $invoice->code,
                             'contract_id' => $contract->id,
                             'billing_year_month' => $billingYearMonth,
+                            'source_invoice_id' => $sourceInvoice->id,
                             'from_bp_id' => $edge['from_bp_id'],
                             'to_bp_id' => $edge['to_bp_id'],
                             'billing_batch_run_id' => $billingBatchRunId,
+                            'payment_ratio' => $ratio,
                         ],
                     );
                 }
@@ -307,15 +376,229 @@ class KickbackService
         });
     }
 
-    public function markPaid(User $actor, KickbackInvoice $invoice): KickbackInvoice
+    /**
+     * 管理者による端数調整。明細「端数調整」を税込1円単位で登録／更新する（税率0・マイナス可）。
+     * amount=0 の場合は調整明細を削除する。
+     */
+    public function adjustAmounts(User $actor, KickbackInvoice $invoice, int $adjustmentInclusive): KickbackInvoice
+    {
+        if ($actor->user_type !== UserType::Admin) {
+            throw new InvalidArgumentException('キックバック金額の調整は管理者のみ可能です。');
+        }
+
+        $this->assertCanManage($actor, $invoice);
+
+        if ($invoice->status !== InvoiceStatus::Issued) {
+            throw new InvalidArgumentException('発行済のキックバックのみ金額調整できます。');
+        }
+
+        return DB::transaction(function () use ($actor, $invoice, $adjustmentInclusive) {
+            $invoice->load('lines');
+            $existing = $invoice->lines->firstWhere('is_adjustment', true);
+
+            if ($adjustmentInclusive === 0) {
+                if ($existing) {
+                    $existing->delete();
+                }
+            } else {
+                $payload = [
+                    'kickback_invoice_id' => $invoice->id,
+                    'contract_item_id' => null,
+                    'item_id' => null,
+                    'seller_bp_id' => $invoice->from_bp_id,
+                    'buyer_bp_id' => $invoice->to_bp_id,
+                    'description' => '端数調整',
+                    'upper_amount' => 0,
+                    'partition_amount' => 0,
+                    'amount' => $adjustmentInclusive,
+                    'tax_rate' => 0,
+                    'tax_amount' => 0,
+                    'amount_inclusive' => $adjustmentInclusive,
+                    'sort_order' => 9999,
+                    'is_adjustment' => true,
+                ];
+
+                if ($existing) {
+                    $existing->fill($payload)->save();
+                } else {
+                    KickbackInvoiceLine::query()->create($payload);
+                }
+            }
+
+            $invoice->load('lines');
+            $invoice->subtotal = (int) $invoice->lines->sum('amount');
+            $invoice->tax_total = (int) $invoice->lines->sum('tax_amount');
+            $invoice->total = (int) $invoice->lines->sum('amount_inclusive');
+            $invoice->manual_adjusted = $invoice->lines->contains(fn ($line) => $line->is_adjustment);
+            $invoice->save();
+
+            $this->auditLogger->log(
+                'billing',
+                'kickback.adjust',
+                'success',
+                $actor,
+                targetType: KickbackInvoice::class,
+                targetId: $invoice->id,
+                meta: [
+                    'code' => $invoice->code,
+                    'adjustment_inclusive' => $adjustmentInclusive,
+                    'total' => $invoice->total,
+                ],
+            );
+
+            return $invoice->fresh('lines');
+        });
+    }
+
+    /**
+     * 対象請求に紐づくキックバックを取下げ（請求取下げ連動）。
+     */
+    public function withdrawForSourceInvoice(Invoice $sourceInvoice, ?User $actor = null): void
+    {
+        $kickbacks = KickbackInvoice::query()
+            ->where('source_invoice_id', $sourceInvoice->id)
+            ->where('status', '!=', InvoiceStatus::Withdrawn->value)
+            ->get();
+
+        foreach ($kickbacks as $kickback) {
+            if ($kickback->status === InvoiceStatus::Paid) {
+                throw new InvalidArgumentException(
+                    "入金済のキックバック（{$kickback->code}）があるため請求を取下げできません。"
+                );
+            }
+            $kickback->status = InvoiceStatus::Withdrawn;
+            $kickback->withdrawn_at = now();
+            $kickback->save();
+
+            if ($actor) {
+                $this->auditLogger->log(
+                    'billing',
+                    'kickback.withdraw',
+                    'success',
+                    $actor,
+                    targetType: KickbackInvoice::class,
+                    targetId: $kickback->id,
+                    meta: [
+                        'code' => $kickback->code,
+                        'source_invoice_id' => $sourceInvoice->id,
+                        'reason' => 'source_invoice_withdrawn',
+                    ],
+                );
+            }
+        }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $lines
+     * @return list<array<string, mixed>>
+     */
+    private function scaleEdgeLines(array $lines, float $ratio): array
+    {
+        $scaled = [];
+        foreach ($lines as $row) {
+            $baseAmount = (int) $row['amount'];
+            $amount = (int) round($baseAmount * $ratio);
+            if ($amount < 0) {
+                $amount = 0;
+            }
+            $rate = (int) $row['tax_rate'];
+            $inclusive = TaxPrice::inclusive($amount, $rate);
+            $scaled[] = [
+                ...$row,
+                'amount' => $amount,
+                'tax_amount' => $inclusive - $amount,
+                'amount_inclusive' => $inclusive,
+            ];
+        }
+
+        return $scaled;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $scaledLines
+     */
+    private function replaceKickbackAmounts(
+        KickbackInvoice $invoice,
+        array $scaledLines,
+        ?int $billingBatchRunId,
+        int $sourceInvoiceId,
+        bool $clearManual,
+    ): void {
+        $invoice->lines()->delete();
+        $sort = 0;
+        foreach ($scaledLines as $row) {
+            KickbackInvoiceLine::query()->create([
+                'kickback_invoice_id' => $invoice->id,
+                ...$row,
+                'sort_order' => $sort++,
+                'is_adjustment' => false,
+            ]);
+        }
+
+        $invoice->source_invoice_id = $sourceInvoiceId;
+        if ($billingBatchRunId !== null) {
+            $invoice->billing_batch_run_id = $billingBatchRunId;
+        }
+        $invoice->subtotal = array_sum(array_column($scaledLines, 'amount'));
+        $invoice->tax_total = array_sum(array_column($scaledLines, 'tax_amount'));
+        $invoice->total = array_sum(array_column($scaledLines, 'amount_inclusive'));
+        if ($clearManual) {
+            $invoice->manual_adjusted = false;
+        }
+        $invoice->save();
+    }
+
+    public function markPaid(User $actor, KickbackInvoice $invoice, ?int $paidAmount = null): KickbackInvoice
     {
         $this->assertCanManage($actor, $invoice);
         if ($invoice->status !== InvoiceStatus::Issued) {
             throw new InvalidArgumentException('発行済のキックバックのみ入金済にできます。');
         }
+
+        $amount = $paidAmount ?? (int) $invoice->total;
+        if ($amount < 0) {
+            throw new InvalidArgumentException('入金金額は0以上で指定してください。');
+        }
+
         $invoice->status = InvoiceStatus::Paid;
+        $invoice->paid_amount = $amount;
         $invoice->paid_at = now();
         $invoice->save();
+
+        return $invoice->fresh();
+    }
+
+    /**
+     * 入金済キックバックの入金金額を管理者が修正する。
+     */
+    public function updatePaidAmount(User $actor, KickbackInvoice $invoice, int $paidAmount): KickbackInvoice
+    {
+        if ($actor->user_type !== UserType::Admin) {
+            throw new InvalidArgumentException('入金金額の修正は管理者のみ可能です。');
+        }
+
+        $this->assertCanManage($actor, $invoice);
+
+        if ($invoice->status !== InvoiceStatus::Paid) {
+            throw new InvalidArgumentException('入金済のキックバックのみ入金金額を修正できます。');
+        }
+
+        if ($paidAmount < 0) {
+            throw new InvalidArgumentException('入金金額は0以上で指定してください。');
+        }
+
+        $invoice->paid_amount = $paidAmount;
+        $invoice->save();
+
+        $this->auditLogger->log(
+            'billing',
+            'kickback.paid_amount.update',
+            'success',
+            $actor,
+            targetType: KickbackInvoice::class,
+            targetId: $invoice->id,
+            meta: ['code' => $invoice->code, 'paid_amount' => $paidAmount],
+        );
 
         return $invoice->fresh();
     }

@@ -23,6 +23,8 @@ class KickbackInvoiceController extends Controller
             'invoices' => $kickbacks->visibleQuery($actor)->latest('id')->paginate(20),
             'routePrefix' => 'bp',
             'canManage' => $authorization->can($actor, 'invoice.manage'),
+            'canAdjustAmounts' => false,
+            'canEditPaidAmount' => false,
         ]);
     }
 
@@ -33,16 +35,22 @@ class KickbackInvoiceController extends Controller
         $kickbacks->assertVisible($actor, $kickback);
 
         return view('admin.kickbacks.show', [
-            'invoice' => $kickback->load(['lines', 'contract', 'fromBp', 'toBp']),
+            'invoice' => $kickback->load(['lines', 'contract', 'fromBp', 'toBp', 'sourceInvoice']),
             'routePrefix' => 'bp',
             'canManage' => $authorization->can($actor, 'invoice.manage'),
+            'canAdjustAmounts' => false,
+            'canEditPaidAmount' => false,
         ]);
     }
 
     public function markPaid(Request $request, KickbackInvoice $kickback, KickbackService $kickbacks): RedirectResponse
     {
+        $validated = $request->validate([
+            'paid_amount' => ['required', 'integer', 'min:0'],
+        ]);
+
         try {
-            $kickbacks->markPaid($request->user('bp'), $kickback);
+            $kickbacks->markPaid($request->user('bp'), $kickback, (int) $validated['paid_amount']);
         } catch (InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['kickback' => $exception->getMessage()]);
         }
@@ -59,5 +67,25 @@ class KickbackInvoiceController extends Controller
         }
 
         return back()->with('status', 'キックバックを取下げました。');
+    }
+
+    public function regenerate(Request $request, KickbackInvoice $kickback, KickbackService $kickbacks): RedirectResponse
+    {
+        $kickback->load('sourceInvoice');
+        if (! $kickback->sourceInvoice) {
+            throw ValidationException::withMessages(['kickback' => '対象請求が紐づいていないため再生成できません。']);
+        }
+
+        try {
+            $kickbacks->syncForSourceInvoice(
+                $kickback->sourceInvoice,
+                $request->user('bp'),
+                force: true,
+            );
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['kickback' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', 'キックバックを再計算しました。');
     }
 }

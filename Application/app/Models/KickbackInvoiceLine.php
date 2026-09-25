@@ -21,6 +21,7 @@ class KickbackInvoiceLine extends Model
         'tax_amount',
         'amount_inclusive',
         'sort_order',
+        'is_adjustment',
     ];
 
     protected function casts(): array
@@ -33,6 +34,7 @@ class KickbackInvoiceLine extends Model
             'tax_amount' => 'integer',
             'amount_inclusive' => 'integer',
             'sort_order' => 'integer',
+            'is_adjustment' => 'boolean',
         ];
     }
 

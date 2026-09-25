@@ -54,7 +54,8 @@
                 <th>請求月</th>
                 <th>契約</th>
                 <th>カスタマー</th>
-                <th class="text-end">金額（税込）</th>
+                <th class="text-end">請求額（税込）</th>
+                <th class="text-end">入金額（税込）</th>
                 <th>状態</th>
             </tr>
             </thead>
@@ -66,10 +67,20 @@
                     <td><code>{{ $invoice->contract?->code }}</code></td>
                     <td>{{ $invoice->customer?->name }}</td>
                     <td class="text-end">{{ number_format($invoice->total) }}</td>
-                    <td>{{ $invoice->status->label() }}</td>
+                    <td class="text-end">
+                        @if ($invoice->paid_amount !== null)
+                            {{ number_format($invoice->paid_amount) }}
+                        @else
+                            <span class="text-muted">—</span>
+                        @endif
+                    </td>
+                    <td>
+                        {{ $invoice->status->label() }}
+                        @include('partials.invoice-payment-diff-badge', ['invoice' => $invoice, 'class' => 'ms-1'])
+                    </td>
                 </tr>
             @empty
-                <tr><td colspan="6" class="text-muted text-center py-4">この実行で作成された請求書はありません。</td></tr>
+                <tr><td colspan="7" class="text-muted text-center py-4">この実行で作成された請求書はありません。</td></tr>
             @endforelse
             </tbody>
         </table>
@@ -86,7 +97,8 @@
                 <th>契約</th>
                 <th>支払BP</th>
                 <th>受取BP</th>
-                <th class="text-end">税込合計</th>
+                <th class="text-end">請求額（税込）</th>
+                <th class="text-end">入金額（税込）</th>
                 <th>状態</th>
             </tr>
             </thead>
@@ -99,10 +111,20 @@
                     <td>{{ $kickback->fromBp?->code }} / {{ $kickback->fromBp?->name }}</td>
                     <td>{{ $kickback->toBp?->code }} / {{ $kickback->toBp?->name }}</td>
                     <td class="text-end">{{ number_format($kickback->total) }}</td>
-                    <td>{{ $kickback->status->label() }}</td>
+                    <td class="text-end">
+                        @if ($kickback->paid_amount !== null)
+                            {{ number_format($kickback->paid_amount) }}
+                        @else
+                            <span class="text-muted">—</span>
+                        @endif
+                    </td>
+                    <td>
+                        {{ $kickback->status->label() }}
+                        @include('partials.kickback-payment-diff-badge', ['invoice' => $kickback, 'class' => 'ms-1'])
+                    </td>
                 </tr>
             @empty
-                <tr><td colspan="7" class="text-muted text-center py-4">この実行で作成されたキックバックはありません。</td></tr>
+                <tr><td colspan="8" class="text-muted text-center py-4">この実行で作成されたキックバックはありません。</td></tr>
             @endforelse
             </tbody>
         </table>

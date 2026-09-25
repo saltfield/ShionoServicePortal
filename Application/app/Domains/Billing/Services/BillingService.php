@@ -29,6 +29,7 @@ class BillingService
         private readonly AuditLogger $auditLogger,
         private readonly BpHierarchyService $hierarchy,
         private readonly NumberSequenceService $sequences,
+        private readonly KickbackService $kickbacks,
     ) {}
 
     public function visibleQuery(User $actor): Builder
@@ -162,7 +163,7 @@ class BillingService
         });
     }
 
-    public function markPaid(User $actor, Invoice $invoice): Invoice
+    public function markPaid(User $actor, Invoice $invoice, ?int $paidAmount = null): Invoice
     {
         $this->assertCanManageInvoice($actor, $invoice);
 
@@ -170,9 +171,17 @@ class BillingService
             throw new InvalidArgumentException('発行済の請求のみ入金済にできます。');
         }
 
+        $amount = $paidAmount ?? (int) $invoice->total;
+        if ($amount < 0) {
+            throw new InvalidArgumentException('入金金額は0以上で指定してください。');
+        }
+
         $invoice->status = InvoiceStatus::Paid;
+        $invoice->paid_amount = $amount;
         $invoice->paid_at = now();
         $invoice->save();
+
+        $this->kickbacks->syncForSourceInvoice($invoice->fresh(), $actor, force: true);
 
         $this->auditLogger->log(
             'billing',
@@ -181,7 +190,45 @@ class BillingService
             $actor,
             targetType: Invoice::class,
             targetId: $invoice->id,
-            meta: ['code' => $invoice->code],
+            meta: ['code' => $invoice->code, 'paid_amount' => $amount],
+        );
+
+        return $invoice->fresh();
+    }
+
+    /**
+     * 入金済請求の入金金額を管理者／権限者が修正し、キックバックを再計算する。
+     */
+    public function updatePaidAmount(User $actor, Invoice $invoice, int $paidAmount): Invoice
+    {
+        $this->assertCanManageInvoice($actor, $invoice);
+
+        if ($invoice->status !== InvoiceStatus::Paid) {
+            throw new InvalidArgumentException('入金済の請求のみ入金金額を修正できます。');
+        }
+
+        if ($paidAmount < 0) {
+            throw new InvalidArgumentException('入金金額は0以上で指定してください。');
+        }
+
+        // 管理者のみ入金金額の事後修正を許可
+        if ($actor->user_type !== UserType::Admin) {
+            throw new InvalidArgumentException('入金金額の修正は管理者のみ可能です。');
+        }
+
+        $invoice->paid_amount = $paidAmount;
+        $invoice->save();
+
+        $this->kickbacks->syncForSourceInvoice($invoice->fresh(), $actor, force: true);
+
+        $this->auditLogger->log(
+            'billing',
+            'invoice.paid_amount.update',
+            'success',
+            $actor,
+            targetType: Invoice::class,
+            targetId: $invoice->id,
+            meta: ['code' => $invoice->code, 'paid_amount' => $paidAmount],
         );
 
         return $invoice->fresh();
@@ -198,6 +245,8 @@ class BillingService
         if ($invoice->status === InvoiceStatus::Paid) {
             throw new InvalidArgumentException('入金済の請求は取下げできません。');
         }
+
+        $this->kickbacks->withdrawForSourceInvoice($invoice, $actor);
 
         $invoice->status = InvoiceStatus::Withdrawn;
         $invoice->withdrawn_at = now();

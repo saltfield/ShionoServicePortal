@@ -23,6 +23,7 @@ class InvoiceController extends Controller
             'invoices' => $billing->visibleQuery($actor)->latest('id')->paginate(20),
             'routePrefix' => 'bp',
             'canManage' => $authorization->can($actor, 'invoice.manage'),
+            'canEditPaidAmount' => false,
         ]);
     }
 
@@ -33,16 +34,21 @@ class InvoiceController extends Controller
         $billing->assertVisible($actor, $invoice);
 
         return view('admin.invoices.show', [
-            'invoice' => $invoice->load(['lines', 'customer', 'owningBp', 'issuerBp', 'contract']),
+            'invoice' => $invoice->load(['lines', 'customer', 'owningBp', 'issuerBp', 'contract', 'kickbacks']),
             'routePrefix' => 'bp',
             'canManage' => $authorization->can($actor, 'invoice.manage'),
+            'canEditPaidAmount' => false,
         ]);
     }
 
     public function markPaid(Request $request, Invoice $invoice, BillingService $billing): RedirectResponse
     {
+        $validated = $request->validate([
+            'paid_amount' => ['required', 'integer', 'min:0'],
+        ]);
+
         try {
-            $billing->markPaid($request->user('bp'), $invoice);
+            $billing->markPaid($request->user('bp'), $invoice, (int) $validated['paid_amount']);
         } catch (InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['invoice' => $exception->getMessage()]);
         }

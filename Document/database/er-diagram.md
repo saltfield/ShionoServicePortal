@@ -239,6 +239,7 @@ UNIQUE(item_id, bp_id, customer_id)
 | due_year_month | CHAR(6) | 請求月の翌月 |
 | status | VARCHAR | issued / paid / withdrawn |
 | subtotal / tax_total / total | BIGINT | 円（整数・税別／税／税込） |
+| paid_amount | BIGINT NULL | 入金金額（税込）。キックバック按分の分子 |
 | issued_at / paid_at / withdrawn_at | | |
 | softDeletes | | |
 
@@ -261,7 +262,7 @@ UNIQUE(item_id, bp_id, customer_id)
 実行に紐づく契約単位エラー（phase: `customer_invoice` / `kickback`）。
 
 #### `kickback_invoices` / `kickback_invoice_lines`
-BP 間キックバック。`from_bp_id`→`to_bp_id`、`billing_batch_run_id`、ステータスは invoices と同様（issued/paid/withdrawn）。
+BP 間キックバック。`from_bp_id`（上位・支払）→`to_bp_id`（下位・受取）、`source_invoice_id`（対象カスタマー請求＝バッチ月の6ヶ月前）、`billing_batch_run_id`、ステータスは invoices と同様（issued/paid/withdrawn）。金額は対象請求の税込入金按分（未入金は0）。管理者は `manual_adjusted` で端数調整可。
 
 #### `contract_item_price_layers`
 価格承認時の仕切りスナップショット（seller/buyer/amount/depth_from_root）。

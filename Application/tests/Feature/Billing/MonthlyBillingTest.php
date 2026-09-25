@@ -5,6 +5,7 @@ use App\Domains\Auth\Enums\TwoFactorMode;
 use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Auth\Services\NumberSequenceService;
 use App\Domains\Billing\Enums\InvoiceStatus;
+use App\Domains\Billing\Services\BillingService;
 use App\Domains\Billing\Services\BillingScheduleService;
 use App\Domains\Billing\Services\KickbackService;
 use App\Domains\Billing\Services\MonthlyBillingService;
@@ -136,29 +137,85 @@ it('generates customer invoice for issuer root and owning leaf', function () {
 
 it('generates multi-tier kickbacks from sixth billing month', function () {
     $fx = monthlyBillingFixture();
-    // kickback start = 202609 + 5 months = 202702
+    // first billing 202609 → kickback batch start = 202609 + 6 = 202703
+    // batch 202703 looks at source invoice 202609
     app(MonthlyBillingService::class)->run('202609', $fx['admin']);
     expect(KickbackInvoice::query()->count())->toBe(0);
 
-    $stats = app(MonthlyBillingService::class)->run('202702', $fx['admin']);
+    $source = Invoice::query()->where('billing_year_month', '202609')->first();
+    expect($source)->not->toBeNull();
+
+    $stats = app(MonthlyBillingService::class)->run('202703', $fx['admin']);
     expect($stats['kickbacks'])->toBe(2)
         ->and($stats['errors'])->toBe(0);
 
-    $leafToMid = KickbackInvoice::query()->where('from_bp_id', $fx['leaf']->id)->where('to_bp_id', $fx['mid']->id)->first();
-    $midToRoot = KickbackInvoice::query()->where('from_bp_id', $fx['mid']->id)->where('to_bp_id', $fx['root']->id)->first();
+    $rootToMid = KickbackInvoice::query()->where('from_bp_id', $fx['root']->id)->where('to_bp_id', $fx['mid']->id)->first();
+    $midToLeaf = KickbackInvoice::query()->where('from_bp_id', $fx['mid']->id)->where('to_bp_id', $fx['leaf']->id)->first();
 
-    expect($leafToMid->subtotal)->toBe(2000) // 5000-3000
-        ->and($midToRoot->subtotal)->toBe(1500); // 3000-1500
+    // unpaid → zero amounts, but records exist and link to source invoice
+    expect($rootToMid->source_invoice_id)->toBe($source->id)
+        ->and($midToLeaf->source_invoice_id)->toBe($source->id)
+        ->and($rootToMid->subtotal)->toBe(0)
+        ->and($midToLeaf->subtotal)->toBe(0)
+        ->and($rootToMid->billing_year_month)->toBe('202609');
+
+    app(BillingService::class)->markPaid($fx['admin'], $source->fresh(), (int) $source->total);
+
+    expect($midToLeaf->fresh()->subtotal)->toBe(2000) // 5000-3000
+        ->and($rootToMid->fresh()->subtotal)->toBe(1500); // 3000-1500
+});
+
+it('scales kickbacks by paid amount and allows admin amount adjust', function () {
+    $fx = monthlyBillingFixture();
+    app(MonthlyBillingService::class)->run('202609', $fx['admin']);
+    app(MonthlyBillingService::class)->run('202703', $fx['admin']);
+
+    $source = Invoice::query()->where('billing_year_month', '202609')->firstOrFail();
+    // half payment (tax inclusive)
+    $half = (int) round($source->total / 2);
+    app(BillingService::class)->markPaid($fx['admin'], $source, $half);
+
+    $midToLeaf = KickbackInvoice::query()->where('from_bp_id', $fx['mid']->id)->where('to_bp_id', $fx['leaf']->id)->firstOrFail();
+    expect($midToLeaf->subtotal)->toBe(1000); // 2000 * 0.5
+
+    $beforeTotal = (int) $midToLeaf->fresh()->total;
+    app(KickbackService::class)->adjustAmounts($fx['admin'], $midToLeaf, 1);
+
+    expect($midToLeaf->fresh()->manual_adjusted)->toBeTrue()
+        ->and($midToLeaf->fresh()->total)->toBe($beforeTotal + 1)
+        ->and($midToLeaf->fresh()->lines->firstWhere('is_adjustment', true)?->amount_inclusive)->toBe(1);
+
+    // payment update force-recalculates and clears manual adjust
+    app(BillingService::class)->updatePaidAmount($fx['admin'], $source->fresh(), (int) $source->total);
+    expect($midToLeaf->fresh()->manual_adjusted)->toBeFalse()
+        ->and($midToLeaf->fresh()->subtotal)->toBe(2000)
+        ->and($midToLeaf->fresh()->lines->firstWhere('is_adjustment', true))->toBeNull();
+});
+
+it('withdraws linked kickbacks when source invoice is withdrawn', function () {
+    $fx = monthlyBillingFixture();
+    app(MonthlyBillingService::class)->run('202609', $fx['admin']);
+    app(MonthlyBillingService::class)->run('202703', $fx['admin']);
+
+    $source = Invoice::query()->where('billing_year_month', '202609')->firstOrFail();
+    expect(KickbackInvoice::query()->where('status', '!=', InvoiceStatus::Withdrawn->value)->count())->toBe(2);
+
+    app(BillingService::class)->withdraw($fx['admin'], $source);
+
+    expect(KickbackInvoice::query()->where('status', InvoiceStatus::Withdrawn->value)->count())->toBe(2)
+        ->and($source->fresh()->status)->toBe(InvoiceStatus::Withdrawn);
 });
 
 it('records negative kickback as batch error and continues', function () {
     $fx = monthlyBillingFixture();
+    app(MonthlyBillingService::class)->run('202609', $fx['admin']);
+
     $line = $fx['contract']->items->first();
     $line->update(['unit_price' => 1000]); // less than mid->leaf wholesale 3000
     ContractItemPriceLayer::query()->where('contract_item_id', $line->id)->delete();
     app(\App\Domains\Contract\Services\ContractPriceLayerService::class)->syncForContract($fx['contract']->fresh(['owningBp', 'items.item']));
 
-    $stats = app(MonthlyBillingService::class)->run('202702', $fx['admin']);
+    $stats = app(MonthlyBillingService::class)->run('202703', $fx['admin']);
     expect($stats['errors'])->toBeGreaterThan(0)
         ->and($stats['status'])->not->toBe(BillingBatchRunStatus::Success->value)
         ->and(BillingBatchError::query()->where('phase', 'kickback')->exists())->toBeTrue();
