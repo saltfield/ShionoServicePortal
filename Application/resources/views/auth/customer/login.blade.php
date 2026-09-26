@@ -20,7 +20,7 @@
                 <div class="mb-3">
                     <label for="cn" class="form-label">CN</label>
                     <input type="text" name="cn" id="cn" value="{{ old('cn') }}"
-                           class="form-control" required autofocus placeholder="CN202609001">
+                           class="form-control" required autofocus placeholder="CN123456789">
                 </div>
                 <div class="mb-3">
                     <label for="login_id" class="form-label">ログインID</label>

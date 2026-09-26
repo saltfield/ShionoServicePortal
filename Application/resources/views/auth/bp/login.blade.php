@@ -20,7 +20,7 @@
                 <div class="mb-3">
                     <label for="bpn" class="form-label">BPN</label>
                     <input type="text" name="bpn" id="bpn" value="{{ old('bpn') }}"
-                           class="form-control" required autofocus placeholder="BPN202609001">
+                           class="form-control" required autofocus placeholder="BPN123456789">
                 </div>
                 <div class="mb-3">
                     <label for="login_id" class="form-label">ログインID</label>
