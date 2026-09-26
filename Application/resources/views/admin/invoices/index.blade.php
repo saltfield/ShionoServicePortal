@@ -7,7 +7,7 @@
 
 @section('content')
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">請求一覧</h1>
+        <h1 class="ssp-page-title mb-0">請求一覧</h1>
         @if (in_array($routePrefix ?? 'admin', ['admin', 'bp'], true))
             <a href="{{ route(($routePrefix ?? 'admin').'.kickbacks.index') }}" class="btn btn-outline-secondary btn-sm">キックバック</a>
         @endif

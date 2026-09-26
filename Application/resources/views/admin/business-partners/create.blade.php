@@ -12,7 +12,7 @@
         'crumbs' => [['label' => 'BP管理', 'url' => route($prefix.'.business-partners.index')]],
         'current' => 'BP新規作成',
     ])
-    <h1 class="h3 mb-3">BP新規作成</h1>
+    <h1 class="ssp-page-title mb-3">BP新規作成</h1>
 
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>

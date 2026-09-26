@@ -48,7 +48,7 @@
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
-            <h1 class="h3 mb-0">契約一覧</h1>
+            <h1 class="ssp-page-title mb-0">契約一覧</h1>
             <p class="text-muted small mb-0 mt-1">
                 @if (($routePrefix ?? 'admin') === 'bp')
                     配下BPの全契約を表示します。特定カスタマーの契約はカスタマー詳細から確認できます。

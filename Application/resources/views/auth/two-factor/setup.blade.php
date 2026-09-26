@@ -3,18 +3,20 @@
 @section('title', '二段階認証の設定')
 
 @section('content')
-    <div class="card shadow-sm">
-        <div class="card-body p-4">
-            <h1 class="h4 mb-3">二段階認証の設定</h1>
-            <p class="text-muted small mb-3">
+    <div class="ssp-login-panel">
+        <div class="ssp-login-panel__accent" aria-hidden="true"></div>
+        <div class="ssp-login-panel__body">
+            <div class="ssp-login-brand">SSP</div>
+            <h1 class="ssp-login-title">二段階認証の設定</h1>
+            <p class="ssp-login-lead">
                 Google Authenticator などで QR コードを読み取り、表示された6桁コードで設定を完了してください。
             </p>
 
             <div class="text-center mb-3">{!! $qrSvg !!}</div>
-            <p class="small text-muted text-center">手動入力用シークレット: <code>{{ $secret }}</code></p>
+            <p class="small text-muted text-center mb-3">手動入力用シークレット: <code>{{ $secret }}</code></p>
 
             @if ($errors->any())
-                <div class="alert alert-danger">{{ $errors->first() }}</div>
+                <div class="alert alert-danger py-2">{{ $errors->first() }}</div>
             @endif
 
             <form method="POST" action="{{ $storeRoute }}">

@@ -401,16 +401,28 @@ class InquiryService
 
     public function unreadReceivedCount(User $actor): int
     {
+        if (! $this->authorization->can($actor, 'inquiry.view')) {
+            return 0;
+        }
+
         return $this->countUnread($actor, $this->receivedQuery($actor));
     }
 
     public function unreadIssuedCount(User $actor): int
     {
+        if (! $this->authorization->can($actor, 'inquiry.view')) {
+            return 0;
+        }
+
         return $this->countUnread($actor, $this->issuedQuery($actor));
     }
 
     public function unreadCount(User $actor): int
     {
+        if (! $this->authorization->can($actor, 'inquiry.view')) {
+            return 0;
+        }
+
         return $this->countUnread($actor, $this->visibleQuery($actor));
     }
 

@@ -7,7 +7,7 @@
 @section('logout_action', route(($routePrefix ?? 'admin').'.logout'))
 
 @section('content')
-    <nav aria-label="breadcrumb">
+    <nav class="ssp-breadcrumb" aria-label="breadcrumb">
         <ol class="breadcrumb small mb-2">
             @php
                 $listRoute = ($listMode ?? 'received') === 'issued'
@@ -21,7 +21,7 @@
     </nav>
     <div class="mb-3">
         <div class="small text-muted font-monospace mb-1">{{ $inquiry->code }}</div>
-        <h1 class="h3 mb-0">{{ $inquiry->subject }}</h1>
+        <h1 class="ssp-page-title mb-0">{{ $inquiry->subject }}</h1>
     </div>
 
     @if (session('status'))

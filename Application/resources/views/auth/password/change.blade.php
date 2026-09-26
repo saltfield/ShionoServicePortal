@@ -6,7 +6,7 @@
 @endsection
 
 @section('content')
-    <h1 class="h3 mb-3">パスワード変更</h1>
+    <h1 class="ssp-page-title mb-3">パスワード変更</h1>
 
     @if (session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>

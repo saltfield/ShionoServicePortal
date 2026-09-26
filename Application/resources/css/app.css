@@ -1,4 +1,440 @@
-/* Application styles (Bootstrap is imported from JS) */
+/* Phase 11 design tokens + shell — Bootstrap continues underneath */
+
+:root {
+    --ssp-bg: #f4f6f8;
+    --ssp-surface: #ffffff;
+    --ssp-border: #d8dee6;
+    --ssp-text: #1a2332;
+    --ssp-text-muted: #5c6b7a;
+    --ssp-accent: #2f5d8a;
+    --ssp-accent-hover: #244a6e;
+    --ssp-accent-subtle: #e8eef4;
+    --ssp-danger: #b42318;
+    --ssp-success: #1f6b45;
+    --ssp-warning: #9a6700;
+    --ssp-area: #2f5d8a;
+    --ssp-fs-page-title: 1.5rem;
+    --ssp-fs-section: 1.125rem;
+    --ssp-radius: 0.375rem;
+    --ssp-shadow: 0 1px 2px rgba(26, 35, 50, 0.06);
+    --ssp-shadow-lg: 0 8px 24px rgba(26, 35, 50, 0.08);
+}
+
+.ssp-area-admin {
+    --ssp-area: #2f5d8a;
+}
+
+.ssp-area-bp {
+    --ssp-area: #3d6b5a;
+}
+
+.ssp-area-customer {
+    --ssp-area: #6b5a3d;
+}
+
 body {
     min-height: 100vh;
+    background-color: var(--ssp-bg);
+    color: var(--ssp-text);
+}
+
+/* —— App shell —— */
+.ssp-navbar {
+    background-color: #1a2332 !important;
+    border-bottom: 3px solid var(--ssp-area);
+}
+
+.ssp-navbar .navbar-brand {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.ssp-navbar .nav-link.active {
+    color: #fff !important;
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: var(--ssp-radius);
+}
+
+.ssp-main {
+    padding-top: 1.5rem;
+    padding-bottom: 2.5rem;
+}
+
+.ssp-page-title {
+    font-size: var(--ssp-fs-page-title);
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    color: var(--ssp-text);
+}
+
+.ssp-page-lead {
+    color: var(--ssp-text-muted);
+    font-size: 0.875rem;
+    margin-bottom: 1.25rem;
+}
+
+.ssp-section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ssp-text-muted);
+    margin-bottom: 0.75rem;
+}
+
+/* —— Guest / login —— */
+.ssp-guest {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    background:
+        linear-gradient(180deg, var(--ssp-accent-subtle) 0%, var(--ssp-bg) 42%, var(--ssp-bg) 100%);
+}
+
+.ssp-guest.ssp-area-bp {
+    background:
+        linear-gradient(180deg, #eaf2ee 0%, var(--ssp-bg) 42%, var(--ssp-bg) 100%);
+}
+
+.ssp-guest.ssp-area-customer {
+    background:
+        linear-gradient(180deg, #f3efe8 0%, var(--ssp-bg) 42%, var(--ssp-bg) 100%);
+}
+
+.ssp-login-panel {
+    background: var(--ssp-surface);
+    border: 1px solid var(--ssp-border);
+    border-radius: calc(var(--ssp-radius) + 0.125rem);
+    box-shadow: var(--ssp-shadow-lg);
+    overflow: hidden;
+}
+
+.ssp-login-panel__accent {
+    height: 4px;
+    background: var(--ssp-area);
+}
+
+.ssp-login-panel__body {
+    padding: 1.75rem 1.5rem 1.5rem;
+}
+
+.ssp-login-brand {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ssp-text-muted);
+    margin-bottom: 0.35rem;
+}
+
+.ssp-login-title {
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    color: var(--ssp-text);
+}
+
+.ssp-login-lead {
+    color: var(--ssp-text-muted);
+    font-size: 0.875rem;
+    margin-bottom: 1.25rem;
+}
+
+.ssp-login-panel .btn-primary {
+    background-color: var(--ssp-area);
+    border-color: var(--ssp-area);
+}
+
+.ssp-login-panel .btn-primary:hover,
+.ssp-login-panel .btn-primary:focus {
+    background-color: var(--ssp-accent-hover);
+    border-color: var(--ssp-accent-hover);
+}
+
+.ssp-login-panel .form-control:focus {
+    border-color: var(--ssp-area);
+    box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--ssp-area) 25%, transparent);
+}
+
+/* —— Dashboard —— */
+.ssp-org-card {
+    background: var(--ssp-surface);
+    border: 1px solid var(--ssp-border);
+    border-radius: var(--ssp-radius);
+    box-shadow: var(--ssp-shadow);
+    padding: 1rem 1.15rem;
+    max-width: 28rem;
+    margin-bottom: 1.25rem;
+}
+
+.ssp-org-card__label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ssp-text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.ssp-stat-card {
+    display: block;
+    background: var(--ssp-surface);
+    border: 1px solid var(--ssp-border);
+    border-radius: var(--ssp-radius);
+    box-shadow: var(--ssp-shadow);
+    padding: 1rem 1.15rem;
+    height: 100%;
+    text-decoration: none;
+    color: var(--ssp-text);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ssp-stat-card:hover {
+    border-color: var(--ssp-area);
+    box-shadow: var(--ssp-shadow-lg);
+    color: var(--ssp-text);
+}
+
+.ssp-stat-card--attention {
+    border-color: #e0b44a;
+    background: #fffbeb;
+}
+
+.ssp-stat-card__label {
+    font-size: 0.8125rem;
+    color: var(--ssp-text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.ssp-stat-card__value {
+    font-size: 1.75rem;
+    font-weight: 650;
+    line-height: 1.1;
+    color: var(--ssp-text);
+}
+
+.ssp-stat-card--attention .ssp-stat-card__value {
+    color: var(--ssp-warning);
+}
+
+/* —— Global authenticated content —— */
+.ssp-main > h1.h3,
+.ssp-main h1.h3,
+.ssp-page-title {
+    font-size: var(--ssp-fs-page-title);
+    font-weight: 600;
+    color: var(--ssp-text);
+    letter-spacing: -0.01em;
+}
+
+.ssp-main > h1.h3.mb-0,
+.ssp-main h1.h3.mb-0 {
+    margin-bottom: 0 !important;
+}
+
+.ssp-main > h1.h3.mb-3,
+.ssp-main h1.h3.mb-3 {
+    margin-bottom: 1rem !important;
+}
+
+.ssp-breadcrumb .breadcrumb {
+    margin-bottom: 0.75rem;
+    --bs-breadcrumb-divider-color: var(--ssp-text-muted);
+}
+
+.ssp-breadcrumb .breadcrumb-item,
+.ssp-breadcrumb .breadcrumb-item a {
+    color: var(--ssp-text-muted);
+    text-decoration: none;
+}
+
+.ssp-breadcrumb .breadcrumb-item a:hover {
+    color: var(--ssp-accent);
+}
+
+.ssp-breadcrumb .breadcrumb-item.active {
+    color: var(--ssp-text);
+    font-weight: 500;
+}
+
+.ssp-main .table {
+    --bs-table-bg: var(--ssp-surface);
+    border-color: var(--ssp-border);
+}
+
+.ssp-main .table > :not(caption) > * > * {
+    border-bottom-color: var(--ssp-border);
+}
+
+.ssp-main .table thead th {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--ssp-text-muted);
+    background: #eef2f6;
+    border-bottom-width: 1px;
+    white-space: nowrap;
+}
+
+.ssp-main .table-striped > tbody > tr:nth-of-type(odd) > * {
+    --bs-table-bg-type: #fafbfc;
+}
+
+.ssp-main .table-responsive {
+    background: var(--ssp-surface);
+    border: 1px solid var(--ssp-border);
+    border-radius: var(--ssp-radius);
+    box-shadow: var(--ssp-shadow);
+}
+
+.ssp-main .table-responsive .table {
+    margin-bottom: 0;
+}
+
+.ssp-main .card,
+.ssp-main form.card,
+.ssp-main .card.card-body,
+.ssp-main form.card-body {
+    background: var(--ssp-surface);
+    border: 1px solid var(--ssp-border);
+    border-radius: var(--ssp-radius);
+    box-shadow: var(--ssp-shadow);
+}
+
+.ssp-main .border.rounded,
+.ssp-main .border.rounded-3 {
+    border-color: var(--ssp-border) !important;
+}
+
+.ssp-main .bg-body-tertiary,
+.ssp-main .bg-white.border,
+.ssp-main .border.rounded.bg-white,
+.ssp-main .border.rounded.p-3.bg-white {
+    background-color: var(--ssp-surface) !important;
+    box-shadow: var(--ssp-shadow);
+}
+
+.ssp-main .nav-pills .nav-link {
+    color: var(--ssp-text-muted);
+    border: 1px solid transparent;
+}
+
+.ssp-main .nav-pills .nav-link:hover {
+    color: var(--ssp-accent);
+    background: var(--ssp-accent-subtle);
+}
+
+.ssp-main .nav-pills .nav-link.active {
+    background-color: var(--ssp-accent);
+    color: #fff;
+}
+
+.ssp-main .nav-tabs .nav-link.active {
+    color: var(--ssp-accent);
+    border-bottom-color: var(--ssp-accent);
+    font-weight: 600;
+}
+
+.ssp-main dl.row dt {
+    color: var(--ssp-text-muted);
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.ssp-main .form-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--ssp-text);
+}
+
+.ssp-main .form-control:focus,
+.ssp-main .form-select:focus {
+    border-color: var(--ssp-accent);
+    box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--ssp-accent) 22%, transparent);
+}
+
+.ssp-main .alert {
+    border-radius: var(--ssp-radius);
+    box-shadow: var(--ssp-shadow);
+}
+
+.ssp-main .pagination {
+    --bs-pagination-color: var(--ssp-accent);
+    --bs-pagination-active-bg: var(--ssp-accent);
+    --bs-pagination-active-border-color: var(--ssp-accent);
+    --bs-pagination-focus-box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--ssp-accent) 22%, transparent);
+}
+
+.ssp-panel {
+    background: var(--ssp-surface);
+    border: 1px solid var(--ssp-border);
+    border-radius: var(--ssp-radius);
+    box-shadow: var(--ssp-shadow);
+    padding: 1rem 1.15rem;
+}
+
+.ssp-main .accordion-item {
+    border-color: var(--ssp-border);
+    background: var(--ssp-surface);
+}
+
+.ssp-main .accordion-button {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--ssp-text);
+    background: #eef2f6;
+}
+
+.ssp-main .accordion-button:not(.collapsed) {
+    color: var(--ssp-accent);
+    background: var(--ssp-accent-subtle);
+    box-shadow: none;
+}
+
+.ssp-main .accordion-button:focus {
+    box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--ssp-accent) 22%, transparent);
+    border-color: var(--ssp-accent);
+}
+
+.ssp-main .list-group-item {
+    border-color: var(--ssp-border);
+}
+
+.ssp-main .badge.text-bg-primary {
+    background-color: var(--ssp-accent) !important;
+}
+
+.ssp-main h2.h5,
+.ssp-main h2.h6,
+.ssp-main h3.h6 {
+    color: var(--ssp-text);
+    font-weight: 600;
+}
+
+/* Bootstrap primary alignment for authenticated shell */
+.btn-primary {
+    --bs-btn-bg: var(--ssp-accent);
+    --bs-btn-border-color: var(--ssp-accent);
+    --bs-btn-hover-bg: var(--ssp-accent-hover);
+    --bs-btn-hover-border-color: var(--ssp-accent-hover);
+    --bs-btn-active-bg: var(--ssp-accent-hover);
+    --bs-btn-active-border-color: var(--ssp-accent-hover);
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--ssp-accent);
+    --bs-btn-border-color: var(--ssp-accent);
+    --bs-btn-hover-bg: var(--ssp-accent);
+    --bs-btn-hover-border-color: var(--ssp-accent);
+    --bs-btn-active-bg: var(--ssp-accent-hover);
+    --bs-btn-active-border-color: var(--ssp-accent-hover);
+}
+
+a:not(.btn):not(.nav-link):not(.dropdown-item):not(.ssp-stat-card):not(.page-link) {
+    color: var(--ssp-accent);
+}
+
+a:not(.btn):not(.nav-link):not(.dropdown-item):not(.ssp-stat-card):not(.page-link):hover {
+    color: var(--ssp-accent-hover);
 }

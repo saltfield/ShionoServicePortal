@@ -22,7 +22,7 @@
         }
     @endphp
     @include('partials.breadcrumb', ['crumbs' => $crumbs, 'current' => 'オーダー作成'])
-    <h1 class="h3 mb-3">オーダー作成</h1>
+    <h1 class="ssp-page-title mb-3">オーダー作成</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif

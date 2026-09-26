@@ -9,7 +9,7 @@
         'crumbs' => [['label' => '監査ログ', 'url' => route('admin.audit-logs.index')]],
         'current' => '監査ログ詳細',
     ])
-    <h1 class="h3 mb-3">監査ログ詳細</h1>
+    <h1 class="ssp-page-title mb-3">監査ログ詳細</h1>
 
     <dl class="row">
         <dt class="col-sm-3">日時</dt><dd class="col-sm-9">{{ $log->created_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s') }}</dd>

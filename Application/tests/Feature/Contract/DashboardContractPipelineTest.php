@@ -113,7 +113,7 @@ it('shows contract pipeline counts on admin dashboard', function () {
     expect($html)->toMatch('/オーダー作成中[\s\S]*?>1</')
         ->and($html)->toMatch('/価格申請（未決裁）[\s\S]*?>1</')
         ->and($html)->toMatch('/承認済・手配中[\s\S]*?>1</')
-        ->and($html)->toContain('bg-warning-subtle');
+        ->and($html)->toContain('ssp-stat-card--attention');
 
     $this->get(route('admin.contracts.index', ['status' => 'approved']))
         ->assertOk()

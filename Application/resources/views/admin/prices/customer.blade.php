@@ -15,7 +15,7 @@
         ],
         'current' => 'カスタマー価格',
     ])
-    <h1 class="h3 mb-3">カスタマー価格</h1>
+    <h1 class="ssp-page-title mb-3">カスタマー価格</h1>
 
     <p class="text-muted mb-3">
         <code>{{ $customer->code }}</code> / {{ $customer->name }}

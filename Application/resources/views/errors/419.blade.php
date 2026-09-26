@@ -2,28 +2,36 @@
 
 @section('title', 'セッション期限切れ')
 
+@php
+    $path = request()->path();
+    if (str_starts_with($path, 'admin')) {
+        $loginUrl = route('admin.login');
+        $areaLabel = '管理者';
+        $portal = 'admin';
+    } elseif (str_starts_with($path, 'bp')) {
+        $loginUrl = route('bp.login');
+        $areaLabel = 'BP';
+        $portal = 'bp';
+    } elseif (str_starts_with($path, 'customer')) {
+        $loginUrl = route('customer.login');
+        $areaLabel = 'カスタマー';
+        $portal = 'customer';
+    } else {
+        $loginUrl = url('/');
+        $areaLabel = null;
+        $portal = 'admin';
+    }
+    $seconds = 10;
+@endphp
+@section('portal', $portal)
+
 @section('content')
-    @php
-        $path = request()->path();
-        if (str_starts_with($path, 'admin')) {
-            $loginUrl = route('admin.login');
-            $areaLabel = '管理者';
-        } elseif (str_starts_with($path, 'bp')) {
-            $loginUrl = route('bp.login');
-            $areaLabel = 'BP';
-        } elseif (str_starts_with($path, 'customer')) {
-            $loginUrl = route('customer.login');
-            $areaLabel = 'カスタマー';
-        } else {
-            $loginUrl = url('/');
-            $areaLabel = null;
-        }
-        $seconds = 10;
-    @endphp
-    <div class="card shadow-sm">
-        <div class="card-body p-4">
-            <h1 class="h4 mb-3">セッションの有効期限が切れました</h1>
-            <p class="text-muted mb-3">
+    <div class="ssp-login-panel">
+        <div class="ssp-login-panel__accent" aria-hidden="true"></div>
+        <div class="ssp-login-panel__body">
+            <div class="ssp-login-brand">SSP</div>
+            <h1 class="ssp-login-title">セッションの有効期限が切れました</h1>
+            <p class="ssp-login-lead">
                 長時間操作がなかったか、別のタブでログアウトした可能性があります。
                 お手数ですが、再度ログインしてください。
             </p>

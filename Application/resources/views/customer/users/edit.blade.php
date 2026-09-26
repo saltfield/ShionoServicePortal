@@ -4,13 +4,13 @@
 @section('area', 'カスタマー')
 
 @section('content')
-    <nav aria-label="breadcrumb">
+    <nav class="ssp-breadcrumb" aria-label="breadcrumb">
         <ol class="breadcrumb small mb-2">
             <li class="breadcrumb-item"><a href="{{ route('customer.users.index') }}">ユーザー管理</a></li>
             <li class="breadcrumb-item active" aria-current="page">ユーザー編集</li>
         </ol>
     </nav>
-    <h1 class="h3 mb-3">ユーザー編集</h1>
+    <h1 class="ssp-page-title mb-3">ユーザー編集</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif

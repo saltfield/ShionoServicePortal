@@ -15,7 +15,7 @@
         ],
         'current' => 'BP編集',
     ])
-    <h1 class="h3 mb-3">BP編集</h1>
+    <h1 class="ssp-page-title mb-3">BP編集</h1>
 
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>

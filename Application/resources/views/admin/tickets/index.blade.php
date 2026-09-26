@@ -14,7 +14,7 @@
         $filters = $filters ?? ['include_closed' => false, 'q' => ''];
     @endphp
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">{{ $pageTitle ?? 'チケット一覧' }}</h1>
+        <h1 class="ssp-page-title mb-0">{{ $pageTitle ?? 'チケット一覧' }}</h1>
         <div class="d-flex gap-2">
             @if (($canCreate ?? false) && ($listMode ?? '') === 'issued')
                 <a href="{{ route(($routePrefix ?? 'admin').'.tickets.create') }}" class="btn btn-primary btn-sm">チケット発行</a>

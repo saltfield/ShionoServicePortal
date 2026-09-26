@@ -12,7 +12,7 @@
         'current' => 'お知らせ詳細',
     ])
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">{{ $announcement->title }}</h1>
+        <h1 class="ssp-page-title mb-0">{{ $announcement->title }}</h1>
         <div class="d-flex gap-2">
             @if ($canManage ?? false)
                 <a href="{{ route(($routePrefix ?? 'admin').'.announcements.edit', $announcement) }}" class="btn btn-primary btn-sm">編集</a>

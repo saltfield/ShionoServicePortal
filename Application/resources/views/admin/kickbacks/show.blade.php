@@ -14,7 +14,7 @@
         'crumbs' => [['label' => 'キックバック', 'url' => route(($routePrefix ?? 'admin').'.kickbacks.index')]],
         'current' => 'キックバック詳細',
     ])
-    <h1 class="h3 mb-3">キックバック詳細</h1>
+    <h1 class="ssp-page-title mb-3">キックバック詳細</h1>
 
     @if (session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>

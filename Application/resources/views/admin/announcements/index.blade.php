@@ -8,7 +8,7 @@
 
 @section('content')
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">お知らせ</h1>
+        <h1 class="ssp-page-title mb-0">お知らせ</h1>
         <div class="d-flex gap-2">
             @if ($canManage ?? false)
                 <a href="{{ route(($routePrefix ?? 'admin').'.announcements.create') }}" class="btn btn-primary btn-sm">新規登録</a>

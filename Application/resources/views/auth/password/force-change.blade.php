@@ -3,13 +3,15 @@
 @section('title', 'パスワード変更')
 
 @section('content')
-    <div class="card shadow-sm">
-        <div class="card-body p-4">
-            <h1 class="h4 mb-3">パスワードの変更</h1>
-            <p class="text-muted small mb-4">セキュリティのため、新しいパスワードの設定が必要です。</p>
+    <div class="ssp-login-panel">
+        <div class="ssp-login-panel__accent" aria-hidden="true"></div>
+        <div class="ssp-login-panel__body">
+            <div class="ssp-login-brand">SSP</div>
+            <h1 class="ssp-login-title">パスワードの変更</h1>
+            <p class="ssp-login-lead">セキュリティのため、新しいパスワードの設定が必要です。</p>
 
             @if ($errors->any())
-                <div class="alert alert-danger">{{ $errors->first() }}</div>
+                <div class="alert alert-danger py-2">{{ $errors->first() }}</div>
             @endif
 
             <form method="POST" action="{{ $updateRoute }}">

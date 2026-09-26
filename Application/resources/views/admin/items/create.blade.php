@@ -15,7 +15,7 @@
         'crumbs' => [['label' => '品目', 'url' => route($prefix.'.items.index')]],
         'current' => $title,
     ])
-    <h1 class="h3 mb-3">{{ $title }}</h1>
+    <h1 class="ssp-page-title mb-3">{{ $title }}</h1>
     @if ($errors->any())
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif

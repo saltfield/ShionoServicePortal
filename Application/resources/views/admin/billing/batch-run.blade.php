@@ -9,7 +9,7 @@
         'crumbs' => [['label' => '自動請求設定', 'url' => route('admin.billing-batch.edit')]],
         'current' => '生成実行 #'.$run->id,
     ])
-    <h1 class="h3 mb-3">生成実行 #{{ $run->id }}</h1>
+    <h1 class="ssp-page-title mb-3">生成実行 #{{ $run->id }}</h1>
 
     <dl class="row mb-4" style="max-width:40rem">
         <dt class="col-sm-4">実行日時</dt>

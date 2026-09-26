@@ -12,7 +12,7 @@
         $selectedBuyer = $selectedBuyer ?? null;
     @endphp
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">卸価格（親→直接子）</h1>
+        <h1 class="ssp-page-title mb-0">卸価格（親→直接子）</h1>
         <a href="{{ route($prefix.'.dashboard') }}" class="btn btn-outline-secondary btn-sm">ダッシュボード</a>
     </div>
 

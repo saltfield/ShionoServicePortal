@@ -15,7 +15,7 @@
         ];
     @endphp
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">監査ログ</h1>
+        <h1 class="ssp-page-title mb-0">監査ログ</h1>
         <a href="{{ route('admin.dashboard') }}" class="btn btn-outline-secondary btn-sm">ダッシュボード</a>
     </div>
 

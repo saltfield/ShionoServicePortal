@@ -69,7 +69,7 @@
     @include('partials.breadcrumb', ['crumbs' => $crumbs, 'current' => '契約詳細'])
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
-            <h1 class="h3 mb-0">契約詳細</h1>
+            <h1 class="ssp-page-title mb-0">契約詳細</h1>
             <p class="text-muted small mb-0 mt-1">
                 <code>{{ $contract->code }}</code> / {{ $contract->status->label() }}
                 @if ($approvalProgressLabel)

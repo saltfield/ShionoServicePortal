@@ -9,7 +9,7 @@
         'crumbs' => [['label' => '契約一覧', 'url' => route('customer.contracts.index')]],
         'current' => '契約詳細',
     ])
-    <h1 class="h3 mb-3">契約詳細</h1>
+    <h1 class="ssp-page-title mb-3">契約詳細</h1>
 
     <dl class="row">
         <dt class="col-sm-3">契約番号</dt><dd class="col-sm-9"><code>{{ $contract->code }}</code></dd>

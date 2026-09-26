@@ -5,7 +5,7 @@
 
 @section('content')
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">データ名称マスタ</h1>
+        <h1 class="ssp-page-title mb-0">データ名称マスタ</h1>
     </div>
     @if (session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>

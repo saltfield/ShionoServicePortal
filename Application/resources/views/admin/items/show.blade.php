@@ -21,7 +21,7 @@
         'current' => '品目詳細',
     ])
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h3 mb-0">品目詳細</h1>
+        <h1 class="ssp-page-title mb-0">品目詳細</h1>
         <div class="d-flex gap-2">
             @if ($manageItem)
                 <a href="{{ route($prefix.'.items.edit', $item) }}" class="btn btn-primary btn-sm">編集</a>

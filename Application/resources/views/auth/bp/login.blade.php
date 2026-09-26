@@ -1,17 +1,18 @@
 @extends('layouts.guest')
 
 @section('title', 'BPログイン')
+@section('portal', 'bp')
 
 @section('content')
-    <div class="card shadow-sm">
-        <div class="card-body p-4">
-            <h1 class="h4 mb-3">BPログイン</h1>
-            <p class="text-muted small mb-4">Business Partner 専用のログイン画面です。BPN の入力が必要です。</p>
+    <div class="ssp-login-panel">
+        <div class="ssp-login-panel__accent" aria-hidden="true"></div>
+        <div class="ssp-login-panel__body">
+            <div class="ssp-login-brand">SSP</div>
+            <h1 class="ssp-login-title">BPログイン</h1>
+            <p class="ssp-login-lead">Business Partner 専用のログイン画面です。BPN の入力が必要です。</p>
 
             @if ($errors->any())
-                <div class="alert alert-danger">
-                    {{ $errors->first() }}
-                </div>
+                <div class="alert alert-danger py-2">{{ $errors->first() }}</div>
             @endif
 
             <form method="POST" action="{{ route('bp.login.store') }}">

@@ -7,7 +7,6 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="bg-light">
 @php
     use App\Support\PortalNavigation;
     $guard = PortalNavigation::guard();
@@ -19,8 +18,14 @@
     $twoFactorRoute = $guard.'.two-factor.settings';
     $menuItems = PortalNavigation::visibleMenu($guard, $user);
     $displayName = $user?->name ?: $user?->login_id ?: 'ユーザー';
+    $areaClass = match ($guard) {
+        'bp' => 'ssp-area-bp',
+        'customer' => 'ssp-area-customer',
+        default => 'ssp-area-admin',
+    };
 @endphp
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+<body class="{{ $areaClass }}">
+    <nav class="navbar navbar-expand-lg navbar-dark ssp-navbar">
         <div class="container">
             @if (\Illuminate\Support\Facades\Route::has($dashboardRoute))
                 <a class="navbar-brand" href="{{ route($dashboardRoute) }}">{{ $area }}</a>
@@ -98,7 +103,7 @@
             </div>
         </div>
     </nav>
-    <main class="container py-4">
+    <main class="container ssp-main">
         @yield('content')
     </main>
     @stack('scripts')
