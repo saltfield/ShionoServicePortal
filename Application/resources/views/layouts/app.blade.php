@@ -16,6 +16,7 @@
     $logoutRoute = $guard.'.logout';
     $passwordRoute = $guard.'.password.edit';
     $twoFactorRoute = $guard.'.two-factor.settings';
+    $notificationSettingsRoute = $guard.'.notification-settings.edit';
     $menuItems = PortalNavigation::visibleMenu($guard, $user);
     $displayName = $user?->name ?: $user?->login_id ?: 'ユーザー';
     $areaClass = match ($guard) {
@@ -88,6 +89,9 @@
                                 @endif
                                 @if (\Illuminate\Support\Facades\Route::has($twoFactorRoute))
                                     <li><a class="dropdown-item" href="{{ route($twoFactorRoute) }}">2FA設定</a></li>
+                                @endif
+                                @if (\Illuminate\Support\Facades\Route::has($notificationSettingsRoute))
+                                    <li><a class="dropdown-item" href="{{ route($notificationSettingsRoute) }}">通知設定</a></li>
                                 @endif
                                 <li><hr class="dropdown-divider"></li>
                                 <li>

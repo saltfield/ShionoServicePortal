@@ -53,6 +53,28 @@ services:
       - ssp-net
     restart: unless-stopped
 
+  # Laravel キューワーカー（メール通知など）。database キューを消化する。
+  queue:
+    build:
+      context: ./php
+      dockerfile: Dockerfile
+    container_name: ssp-queue
+    command: php artisan queue:work --sleep=1 --tries=3 --timeout=90
+    user: "1000:1000"
+    volumes:
+      - ../Application:/var/www/html
+      - ./php/php.ini:/usr/local/etc/php/conf.d/zz-custom.ini:ro
+    environment:
+      TZ: Asia/Tokyo
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      php:
+        condition: service_started
+    networks:
+      - ssp-net
+    restart: unless-stopped
+
   mariadb:
     image: mariadb:11.4
     container_name: ssp-mariadb

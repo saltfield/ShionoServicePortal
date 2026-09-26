@@ -91,7 +91,32 @@
 
 複数ロールを付けた場合、実効権限は **和集合** です。
 
-### 2.3 操作できる人
+### 2.3 メール通知設定（ユーザー編集）
+
+ユーザー編集画面に **メール通知設定** があります（管理者／BP／カスタマーの各ユーザー管理）。
+
+| 種別キー | 内容 | オプトアウト |
+|----------|------|--------------|
+| `ticket.message` | チケット起票・返信 | 可 |
+| `contract.application` | 価格申請・決裁結果 | 可 |
+| `security.password_force` | 強制パスワード変更 | **不可** |
+
+- 本人向け設定はアカウントメニュー **「通知設定」** でも変更できます
+- 通知はユーザーの **個人 email** 宛です。未設定なら送信しません
+- 詳細・環境変数は [phase13-setup.md](../architecture/phase13-setup.md) / [deploy.md](../architecture/deploy.md)
+
+### 2.4 パスワード強制変更
+
+| 操作場所 | 内容 |
+|----------|------|
+| 管理者ユーザー一覧の **PW強制変更** | `must_change_password` を ON（要 `admin.user.force_password`） |
+| ユーザー編集の「次回ログインでパスワード変更を要求」 | 同上（作成時は「初回ログインで…」） |
+
+- 対象ユーザーは次回ログイン時にパスワード変更画面へ誘導されます
+- email がある場合は通知メールも送信されます（未設定時は画面に警告）
+- 強制ONのまま初めてメールを設定したときも通知されます
+
+### 2.5 操作できる人
 
 | 操作者 | 対象 |
 |--------|------|
@@ -254,6 +279,7 @@ group が違うので AND。reopen 権限が無い人の返信を止めます。
 | `role.assign` / `role.revoke` | ユーザーへの割当 |
 | `policy.create` / `policy.update` / `policy.delete` | ABACポリシー |
 | `user.create` / `user.update` / `user.delete` | ユーザー本体 |
+| `admin.user.force_password` | パスワード強制変更 |
 
 ---
 
@@ -261,4 +287,6 @@ group が違うので AND。reopen 権限が無い人の返信を止めます。
 
 - 設計: [iam-design.md](iam-design.md)
 - Phase 12 実装: [../architecture/phase12-plan.md](../architecture/phase12-plan.md) / [../architecture/phase12-setup.md](../architecture/phase12-setup.md)
+- Phase 13 メール通知: [../architecture/phase13-plan.md](../architecture/phase13-plan.md) / [../architecture/phase13-setup.md](../architecture/phase13-setup.md)
+- デプロイ（APP_URL / MAIL_* / queue）: [../architecture/deploy.md](../architecture/deploy.md)
 - 用語: [../architecture/terminology.md](../architecture/terminology.md)

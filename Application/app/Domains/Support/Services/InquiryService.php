@@ -8,6 +8,7 @@ use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Auth\Services\NumberSequenceService;
 use App\Domains\Iam\Services\AuditLogger;
 use App\Domains\Iam\Services\AuthorizationService;
+use App\Domains\Notification\Services\NotificationService;
 use App\Domains\Support\Enums\InquiryAssigneeType;
 use App\Domains\Support\Enums\InquiryMessageType;
 use App\Domains\Support\Enums\InquiryStatus;
@@ -51,6 +52,7 @@ class InquiryService
         private readonly AuditLogger $auditLogger,
         private readonly BpHierarchyService $hierarchy,
         private readonly NumberSequenceService $sequences,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -119,7 +121,10 @@ class InquiryService
                 meta: ['code' => $inquiry->code, 'subject' => $subject],
             );
 
-            return $inquiry->fresh(['messages.attachments']);
+            $inquiry = $inquiry->fresh(['messages.attachments', 'openedBy']);
+            $this->notifications->notifyTicketOpened($inquiry, $message->fresh(), $actor);
+
+            return $inquiry;
         });
     }
 
@@ -166,7 +171,15 @@ class InquiryService
                 targetId: $inquiry->id,
             );
 
-            return $message->load('attachments');
+            $message = $message->load('attachments');
+            $this->notifications->notifyTicketReply(
+                $inquiry->fresh(['openedBy']),
+                $message,
+                $actor,
+                $this->isAssigneeSide($actor, $inquiry),
+            );
+
+            return $message;
         });
     }
 

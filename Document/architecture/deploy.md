@@ -10,6 +10,7 @@ Shiono Service Portal を Docker スタックで起動・更新するための�
 | `nginx` | HTTP :8080 → Laravel `public` |
 | `php` | PHP-FPM 8.3 |
 | `scheduler` | `php artisan schedule:work`（**自動請求に必須**） |
+| `queue` | `php artisan queue:work`（**メール通知に必須**） |
 | `mariadb` | MariaDB 11.4 |
 | `mailpit` | 開発用 SMTP／受信 UI（本番では外部 SMTP に置換推奨） |
 
@@ -17,7 +18,7 @@ Shiono Service Portal を Docker スタックで起動・更新するための�
 
 | ホストパス | コンテナ |
 |------------|----------|
-| `Application/` | `/var/www/html`（php / scheduler / nginx） |
+| `Application/` | `/var/www/html`（php / scheduler / queue / nginx） |
 | `Develop/` | compose・Nginx・PHP・MariaDB 設定 |
 
 TLS は本スタック外のリバースプロキシで終端する（平文 HTTP を 8080 で公開）。
@@ -35,25 +36,38 @@ TLS は本スタック外のリバースプロキシで終端する（平文 HTT
 ```bash
 cd Develop
 cp .env.example .env
-# MYSQL_* / DB_* を本番値に変更
+# MYSQL_*（および同期メモの DB_*）を本番値に変更
 
 cd ../Application
 cp .env.example .env
+# 下記「Application/.env の要点」を本番値に変更
 ```
 
-`Application/.env` の要点:
+#### `Develop/.env`（Compose / MariaDB）
+
+| キー | 例 / 注意 |
+|------|-----------|
+| `MYSQL_ROOT_PASSWORD` | root パスワード |
+| `MYSQL_DATABASE` | DB 名（例: `ssp`） |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | アプリ用 DB ユーザー |
+| `DB_*`（同期メモ） | `Application/.env` の `DB_*` と一致させる |
+| `TZ` | `Asia/Tokyo` |
+
+#### `Application/.env` の要点
 
 | キー | 例 / 注意 |
 |------|-----------|
 | `APP_ENV` | 本番は `production` |
 | `APP_DEBUG` | 本番は `false` |
 | `APP_KEY` | 下記 `key:generate` で生成 |
-| `APP_URL` | 公開 URL（リバースプロキシの HTTPS URL） |
+| `APP_URL` | 公開 URL（リバースプロキシの HTTPS URL）。**メール本文のリンク／ボタンもこの値から生成**される |
 | `APP_TIMEZONE` | `Asia/Tokyo` |
 | `DB_HOST` | compose 内なら `mariadb` |
 | `DB_*` | `Develop/.env` の DB と一致させる |
-| `MAIL_*` | 本番は実 SMTP。開発は `mailpit:1025` |
-| `SESSION_DRIVER` / `CACHE_STORE` / `QUEUE_CONNECTION` | 既定は `database` |
+| `MAIL_*` | 本番は実 SMTP。開発は `mailpit:1025`。認証あり SMTP は `MAIL_USERNAME` / `MAIL_PASSWORD`、TLS は `MAIL_SCHEME=smtps`（ほか `MAIL_HOST` / `MAIL_PORT` / `MAIL_FROM_*`）。キー一覧は `Application/.env.example` / `Develop/.env.example` の同期メモを参照 |
+| `SESSION_DRIVER` | 既定 `database` |
+| `CACHE_STORE` | 既定 `database` |
+| `QUEUE_CONNECTION` | 既定 `database` |
 
 ### 2. コンテナ起動
 
@@ -62,11 +76,11 @@ cd Develop
 docker compose up -d --build
 ```
 
-`scheduler` が含まれていることを確認:
+`scheduler` / `queue` が含まれていることを確認:
 
 ```bash
 docker compose ps
-# ssp-nginx / ssp-php / ssp-scheduler / ssp-mariadb / ssp-mailpit
+# ssp-nginx / ssp-php / ssp-scheduler / ssp-queue / ssp-mariadb / ssp-mailpit
 ```
 
 ### 3. アプリ初期化
@@ -131,6 +145,32 @@ docker compose up -d scheduler
 docker compose logs --tail=50 scheduler
 ```
 
+## メール通知（運用上の必須事項）
+
+業務メール（チケット・価格申請・強制パスワード変更）は **キューワーカーが動いていること**が前提。
+
+| 項目 | 内容 |
+|------|------|
+| コンテナ | `ssp-queue` → `php artisan queue:work` |
+| キュー接続 | `Application/.env` の `QUEUE_CONNECTION=database`（既定） |
+| 開発確認 | Mailpit UI `http://localhost:8025` |
+| 本番 SMTP | `MAIL_HOST` / `MAIL_PORT` / `MAIL_SCHEME` / `MAIL_USERNAME` / `MAIL_PASSWORD` |
+| 購読 | 各ポータルの「通知設定」。強制PWはオフ不可 |
+
+`queue` が止まっていると通知は `jobs` テーブルに溜まるだけで送信されない。
+
+```bash
+docker compose up -d queue
+docker compose logs --tail=50 queue
+docker compose exec -u www-data php php artisan queue:restart
+```
+
+compose 外で動かす場合:
+
+```bash
+php artisan queue:work --sleep=1 --tries=3 --timeout=90
+```
+
 ## 自動請求（運用上の必須事項）
 
 月次請求は **Laravel スケジューラが動いていること**が前提。
@@ -184,6 +224,7 @@ docker compose logs --tail=50 scheduler
 | Permission denied (storage) | `chown -R www-data:www-data storage bootstrap/cache` |
 | 自動請求が動かない | `scheduler` 起動有無、設定の有効・日時、生成履歴 |
 | 予定時刻を過ぎても履歴なし | スケジューラ未起動が大半。起動後は当日取りこぼし回収あり |
+| メールが届かない | `queue` 起動有無、`jobs` / `failed_jobs`、MAIL_*、Mailpit（開発） |
 | マイグレーション失敗 | DB 接続、既存テーブル差分、ログ |
 | 日本語 PDF 化け | コンテナに Noto CJK が入っているか（php イメージ標準） |
 | セッション切れ・URL 不正 | `APP_URL` とプロキシの `X-Forwarded-Proto` |
@@ -191,7 +232,7 @@ docker compose logs --tail=50 scheduler
 ログ参照:
 
 ```bash
-docker compose logs -f php nginx scheduler
+docker compose logs -f php nginx scheduler queue
 docker compose exec -u www-data php tail -n 100 storage/logs/laravel.log
 ```
 
@@ -199,4 +240,5 @@ docker compose exec -u www-data php tail -n 100 storage/logs/laravel.log
 
 - 開発用メモ: [../../Develop/README.md](../../Develop/README.md)
 - 月次請求: [phase10-setup.md](phase10-setup.md)
+- メール通知: [phase13-setup.md](phase13-setup.md)
 - 全体構成: [overview.md](overview.md)

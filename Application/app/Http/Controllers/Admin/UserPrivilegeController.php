@@ -7,6 +7,7 @@ use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Iam\Services\AdminPrivilegeService;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\UserManagementService;
+use App\Domains\Notification\Services\NotificationDispatcher;
 use App\Http\Controllers\Concerns\ConfirmsUserDeletion;
 use App\Http\Controllers\Concerns\ManagesUserRoleAssignments;
 use App\Http\Controllers\Controller;
@@ -142,7 +143,7 @@ class UserPrivilegeController extends Controller
         return $this->redirectAfterUserMutation($request, $user->user_type->value, "{$user->login_id} を作成しました。");
     }
 
-    public function edit(Request $request, User $user, AuthorizationService $authorization, UserManagementService $users): View
+    public function edit(Request $request, User $user, AuthorizationService $authorization, UserManagementService $users, NotificationDispatcher $notifications): View
     {
         $actor = $request->user('admin');
         $authorization->authorize($actor, 'iam.user.manage');
@@ -168,10 +169,11 @@ class UserPrivilegeController extends Controller
             'deleteConfirmationCode' => $this->issueUserDeleteConfirmationCode($user),
             'returnCustomerId' => $returnCustomerId,
             'returnBpId' => $returnBpId,
+            'notificationPreferences' => $notifications->preferencesFor($user),
         ]);
     }
 
-    public function update(Request $request, User $user, UserManagementService $users): RedirectResponse
+    public function update(Request $request, User $user, UserManagementService $users, NotificationDispatcher $notifications): RedirectResponse
     {
         $validated = $this->validatedUser($request, creating: false, target: $user);
 
@@ -181,7 +183,21 @@ class UserPrivilegeController extends Controller
             throw ValidationException::withMessages(['name' => $exception->getMessage()]);
         }
 
-        return $this->redirectAfterUserMutation($request, $user->user_type->value, 'ユーザーを更新しました。');
+        if ($request->boolean('notification_preferences_present')) {
+            $raw = $request->input('preferences', []);
+            $notifications->syncPreferences(
+                $user->fresh(),
+                $notifications->enabledMapFromRequest(is_array($raw) ? $raw : [])
+            );
+        }
+
+        $status = 'ユーザーを更新しました。';
+        $fresh = $user->fresh();
+        if ($fresh->must_change_password && ! filled($fresh->email)) {
+            $status .= ' パスワード強制変更は有効ですが、メール未設定のため通知は送信していません。';
+        }
+
+        return $this->redirectAfterUserMutation($request, $user->user_type->value, $status);
     }
 
     public function destroy(Request $request, User $user, UserManagementService $users): RedirectResponse
@@ -226,7 +242,12 @@ class UserPrivilegeController extends Controller
     {
         $privileges->forcePasswordChange($request->user('admin'), $user);
 
-        return back()->with('status', "{$user->login_id} にパスワード強制変更を設定しました。");
+        $status = "{$user->login_id} にパスワード強制変更を設定しました。";
+        if (! filled($user->email)) {
+            $status .= ' メールアドレス未設定のため通知メールは送信していません。';
+        }
+
+        return back()->with('status', $status);
     }
 
     public function forceDisableTwoFactor(Request $request, User $user, AdminPrivilegeService $privileges): RedirectResponse

@@ -1,6 +1,6 @@
 # Develop — Docker 環境
 
-Nginx + PHP-FPM 8.3 + MariaDB 11.4 + Mailpit + **Scheduler** の開発用スタックです。
+Nginx + PHP-FPM 8.3 + MariaDB 11.4 + Mailpit + **Scheduler** + **Queue** の開発用スタックです。
 
 SSL / リバースプロキシは本ディレクトリでは扱いません。フロントのリバースプロキシから `http://<host>:8080` へ転送してください。
 
@@ -21,6 +21,7 @@ docker compose up -d --build
 | Mailpit UI | http://localhost:8025 |
 | Mailpit SMTP | localhost:1025 |
 | Scheduler | コンテナ内 `php artisan schedule:work`（自動請求） |
+| Queue | コンテナ内 `php artisan queue:work`（メール通知） |
 
 ## 初回アプリセットアップ
 
@@ -35,6 +36,7 @@ docker compose exec -u www-data php php artisan migrate --seed
 - `nginx/conf.d/default.conf` … Laravel `public` 向け。`X-Forwarded-*` を考慮
 - `mariadb/my.cnf` … `utf8mb4` / `utf8mb4_uca1400_ai_ci`、TZ=+09:00
 - `scheduler` … 自動請求バッチ用。停止しているとスケジュール実行されない
+- `queue` … メール通知用。停止していると `jobs` に溜まるだけで送信されない
 
 ## 注意
 

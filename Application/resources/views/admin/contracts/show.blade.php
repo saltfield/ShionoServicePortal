@@ -286,7 +286,7 @@
                     </table>
                 </div>
 
-                <div class="card card-body mb-3" style="max-width:40rem">
+                <div class="card card-body mb-3 mt-3" style="max-width:40rem">
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" value="1" name="special_price_requested" id="draft_special_price_requested" @checked(old('special_price_requested', $isSpecialPrice))>
                         <label class="form-check-label" for="draft_special_price_requested">特価申請する</label>

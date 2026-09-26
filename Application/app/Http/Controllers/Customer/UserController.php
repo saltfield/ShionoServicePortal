@@ -6,6 +6,7 @@ use App\Domains\Auth\Enums\UserType;
 use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\UserManagementService;
+use App\Domains\Notification\Services\NotificationDispatcher;
 use App\Http\Controllers\Concerns\ConfirmsUserDeletion;
 use App\Http\Controllers\Concerns\ManagesUserRoleAssignments;
 use App\Http\Controllers\Controller;
@@ -75,7 +76,7 @@ class UserController extends Controller
             ->with('status', "{$user->login_id} を作成しました。");
     }
 
-    public function edit(Request $request, User $user, AuthorizationService $authorization, UserManagementService $users): View
+    public function edit(Request $request, User $user, AuthorizationService $authorization, UserManagementService $users, NotificationDispatcher $notifications): View
     {
         $actor = $request->user('customer');
         $authorization->authorize($actor, 'iam.user.manage');
@@ -94,10 +95,11 @@ class UserController extends Controller
             'assignableRoles' => $assignableRoles,
             'scopeLabel' => $users->scopeLabelFor($user),
             'deleteConfirmationCode' => $this->issueUserDeleteConfirmationCode($user),
+            'notificationPreferences' => $notifications->preferencesFor($user),
         ]);
     }
 
-    public function update(Request $request, User $user, UserManagementService $users): RedirectResponse
+    public function update(Request $request, User $user, UserManagementService $users, NotificationDispatcher $notifications): RedirectResponse
     {
         $validated = $this->validatedUser($request, creating: false, target: $user);
 
@@ -107,9 +109,23 @@ class UserController extends Controller
             throw ValidationException::withMessages(['name' => $exception->getMessage()]);
         }
 
+        if ($request->boolean('notification_preferences_present')) {
+            $raw = $request->input('preferences', []);
+            $notifications->syncPreferences(
+                $user->fresh(),
+                $notifications->enabledMapFromRequest(is_array($raw) ? $raw : [])
+            );
+        }
+
+        $status = 'ユーザーを更新しました。';
+        $fresh = $user->fresh();
+        if ($fresh->must_change_password && ! filled($fresh->email)) {
+            $status .= ' パスワード強制変更は有効ですが、メール未設定のため通知は送信していません。';
+        }
+
         return redirect()
             ->route('customer.users.index')
-            ->with('status', 'ユーザーを更新しました。');
+            ->with('status', $status);
     }
 
     public function destroy(Request $request, User $user, UserManagementService $users): RedirectResponse

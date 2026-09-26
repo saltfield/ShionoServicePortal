@@ -53,6 +53,7 @@ use App\Http\Controllers\Customer\DashboardController as CustomerDashboardContro
 use App\Http\Controllers\Customer\InquiryController as CustomerInquiryController;
 use App\Http\Controllers\Customer\InvoiceController as CustomerInvoiceController;
 use App\Http\Controllers\Customer\UserController as CustomerUserController;
+use App\Http\Controllers\NotificationSettingsController;
 use App\Http\Controllers\PostalLookupController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -116,6 +117,8 @@ foreach (
                 Route::get('two-factor/settings', [$controllers['twoFactor'], 'showSettings'])->name('two-factor.settings');
                 Route::post('two-factor/settings', [$controllers['twoFactor'], 'enableFromSettings'])->name('two-factor.settings.enable');
                 Route::post('two-factor/disable', [$controllers['twoFactor'], 'disable'])->name('two-factor.disable');
+                Route::get('notification-settings', [NotificationSettingsController::class, 'edit'])->name('notification-settings.edit');
+                Route::post('notification-settings', [NotificationSettingsController::class, 'update'])->name('notification-settings.update');
 
                 if ($guard === 'customer') {
                     Route::get('contracts', [CustomerContractController::class, 'index'])->name('contracts.index');

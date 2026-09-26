@@ -187,7 +187,7 @@
                                 class="btn btn-outline-primary btn-sm js-privilege-confirm"
                                 data-action="{{ route('admin.users.force-password', $user) }}"
                                 data-title="PW強制変更の確認"
-                                data-description="次のユーザーにパスワード強制変更を設定します。次回ログイン時にパスワード変更画面へ誘導されます。"
+                                data-description="次のユーザーにパスワード強制変更を設定します。次回ログイン時にパスワード変更画面へ誘導されます。メールが設定されている場合は通知メールも送信します。"
                                 data-org-code-label="{{ $orgCodeLabel }}"
                                 data-org-name-label="{{ $orgNameLabel }}"
                                 data-org-code="{{ $orgCode }}"

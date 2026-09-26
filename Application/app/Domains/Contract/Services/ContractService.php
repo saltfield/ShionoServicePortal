@@ -15,6 +15,7 @@ use App\Domains\Contract\Enums\ContractStatus;
 use App\Domains\Iam\Services\AuditLogger;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\BpRelationResolver;
+use App\Domains\Notification\Services\NotificationService;
 use App\Models\Application;
 use App\Models\BusinessPartner;
 use App\Models\Contract;
@@ -57,6 +58,7 @@ class ContractService
         private readonly BpRelationResolver $relationResolver,
         private readonly DocumentRenderService $documentRender,
         private readonly ContractPriceLayerService $priceLayers,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -289,6 +291,11 @@ class ContractService
     public function submitPriceApproval(User $actor, Contract $contract, ?string $specialPriceReason = null): Application
     {
         $this->assertEditableDraft($actor, $contract);
+
+        if ($actor->user_type === UserType::Bp && (int) $actor->bp_id !== (int) $contract->owning_bp_id) {
+            throw new InvalidArgumentException('価格承認申請は契約の管理BPのみ行えます。');
+        }
+
         $contract->loadMissing(['owningBp.parent', 'items']);
 
         if ($specialPriceReason !== null) {
@@ -323,6 +330,7 @@ class ContractService
                         'auto' => true,
                         'special_price' => (bool) $contract->special_price_requested,
                         'special_price_reason' => $contract->special_price_reason,
+                        'submitted_by_user_id' => $actor->id,
                     ],
                     'amount' => $contract->items->sum(fn ($i) => (float) $i->partition_price),
                     'decided_by_user_id' => $actor->id,
@@ -349,6 +357,7 @@ class ContractService
                     'special_price_reason' => $isSpecial ? $contract->special_price_reason : null,
                     'chain' => $chainPayload,
                     'resumed_from_application_id' => $resume['rejected_application_id'] ?? null,
+                    'submitted_by_user_id' => $actor->id,
                     'items' => $contract->items->map(function (ContractItem $line) {
                         $standard = $line->standard_partition_price !== null
                             ? (int) $line->standard_partition_price
@@ -379,6 +388,8 @@ class ContractService
                 'chain' => $chainPayload,
                 'resumed' => ($resume['rejected_application_id'] ?? null) !== null,
             ]);
+
+            $this->notifications->notifyApplication($application, $actor, 'submitted');
 
             return $application;
         });
@@ -417,8 +428,10 @@ class ContractService
             if (! $approve) {
                 $this->transition($contract, ContractStatus::Draft, $actor, $note ?? '価格却下');
                 $this->audit($actor, 'contract.price_approval.reject', $contract);
+                $rejected = $application->fresh();
+                $this->notifications->notifyApplication($rejected, $actor, 'rejected');
 
-                return $application->fresh();
+                return $rejected;
             }
 
             $next = $this->nextApprovalRecipient($application);
@@ -435,6 +448,7 @@ class ContractService
                     'forwarded_application_id' => $forwarded->id,
                     'chain' => $forwarded->payload_json['chain'] ?? null,
                 ]);
+                $this->notifications->notifyApplication($forwarded, $actor, 'forwarded');
 
                 return $forwarded;
             }
@@ -449,8 +463,10 @@ class ContractService
             $this->audit($actor, 'contract.price_approval.approve', $contract, [
                 'application_id' => $application->id,
             ]);
+            $approved = $application->fresh();
+            $this->notifications->notifyApplication($approved, $actor, 'approved');
 
-            return $application->fresh();
+            return $approved;
         });
     }
 
@@ -613,11 +629,15 @@ class ContractService
             'from_bp_id' => $contract->owning_bp_id,
             'to_bp_id' => $parent->id,
             'status' => ApplicationStatus::Pending,
-            'payload_json' => ['items' => $payloadItems],
+            'payload_json' => [
+                'items' => $payloadItems,
+                'submitted_by_user_id' => $actor->id,
+            ],
             'amount' => $amount,
         ]);
 
         $this->audit($actor, 'contract.price_change.submit', $contract, ['application_id' => $application->id]);
+        $this->notifications->notifyApplication($application, $actor, 'submitted');
 
         return $application;
     }
@@ -669,7 +689,14 @@ class ContractService
                 ['note' => $note]
             );
 
-            return $application->fresh();
+            $result = $application->fresh();
+            $this->notifications->notifyApplication(
+                $result,
+                $actor,
+                $approve ? 'approved' : 'rejected',
+            );
+
+            return $result;
         });
     }
 

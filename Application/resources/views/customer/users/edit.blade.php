@@ -41,13 +41,17 @@
             <input type="password" name="password_confirmation" id="password_confirmation" class="form-control">
         </div>
         <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" name="must_change_password" value="1" id="must_change_password" @checked(old('must_change_password', false))>
+            <input class="form-check-input" type="checkbox" name="must_change_password" value="1" id="must_change_password" @checked(old('must_change_password', $managedUser->must_change_password))>
             <label class="form-check-label" for="must_change_password">次回ログインでパスワード変更を要求</label>
+            <div class="form-text">オンにすると対象ユーザーへ通知メールを送ります（メール未設定の場合は送信しません）。</div>
         </div>
         <div class="form-check mb-3">
             <input class="form-check-input" type="checkbox" name="is_active" value="1" id="is_active" @checked(old('is_active', $managedUser->is_active))>
             <label class="form-check-label" for="is_active">有効</label>
         </div>
+        @include('partials.users.notification-preferences', [
+            'preferences' => $notificationPreferences ?? [],
+        ])
         <button class="btn btn-primary" type="submit">保存</button>
     </form>
 

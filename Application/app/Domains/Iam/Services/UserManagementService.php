@@ -6,6 +6,7 @@ use App\Domains\Auth\Enums\UserType;
 use App\Domains\Auth\Services\BpHierarchyService;
 use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Iam\Enums\RoleScope;
+use App\Domains\Notification\Services\NotificationService;
 use App\Models\BusinessPartner;
 use App\Models\Customer;
 use App\Models\Role;
@@ -22,6 +23,7 @@ class UserManagementService
         private readonly RbacService $rbac,
         private readonly AuditLogger $auditLogger,
         private readonly BpHierarchyService $hierarchy,
+        private readonly NotificationService $notifications,
     ) {}
 
     /**
@@ -40,7 +42,7 @@ class UserManagementService
             throw new InvalidArgumentException('このログインIDは当該組織で既に使用されています。');
         }
 
-        return DB::transaction(function () use ($actor, $data, $type, $loginId) {
+        $user = DB::transaction(function () use ($actor, $data, $type, $loginId) {
             $user = User::query()->create([
                 'login_id' => $loginId,
                 'password' => Hash::make((string) $data['password']),
@@ -72,6 +74,12 @@ class UserManagementService
 
             return $user;
         });
+
+        if ($user->must_change_password) {
+            $this->notifications->notifyForcePasswordChange($user, $actor);
+        }
+
+        return $user;
     }
 
     /**
@@ -86,7 +94,10 @@ class UserManagementService
             throw new InvalidArgumentException('自分自身を無効化できません。');
         }
 
-        return DB::transaction(function () use ($actor, $target, $data) {
+        $wasForced = (bool) $target->must_change_password;
+        $previousEmail = $target->email;
+
+        $updated = DB::transaction(function () use ($actor, $target, $data) {
             $target->name = $data['name'];
             $target->email = $data['email'] ?? null;
             $target->is_active = (bool) ($data['is_active'] ?? false);
@@ -114,6 +125,17 @@ class UserManagementService
 
             return $target->fresh();
         });
+
+        // 強制ONへの遷移、または強制中に初めてメールが付いたとき通知する
+        $shouldNotifyForce = $updated->must_change_password
+            && filled($updated->email)
+            && (! $wasForced || ! filled($previousEmail));
+
+        if ($shouldNotifyForce) {
+            $this->notifications->notifyForcePasswordChange($updated, $actor);
+        }
+
+        return $updated;
     }
 
     public function delete(User $actor, User $target): void

@@ -3,6 +3,7 @@
 namespace App\Domains\Iam\Services;
 
 use App\Domains\Auth\Enums\TwoFactorMode;
+use App\Domains\Notification\Services\NotificationService;
 use App\Models\BusinessPartner;
 use App\Models\Customer;
 use App\Models\User;
@@ -13,6 +14,7 @@ class AdminPrivilegeService
     public function __construct(
         private readonly AuthorizationService $authorization,
         private readonly AuditLogger $auditLogger,
+        private readonly NotificationService $notifications,
     ) {}
 
     public function forcePasswordChange(User $actor, User $target): void
@@ -34,6 +36,8 @@ class AdminPrivilegeService
             actor: $actor,
             targetUser: $target,
         );
+
+        $this->notifications->notifyForcePasswordChange($target, $actor);
     }
 
     public function forceDisableTwoFactor(User $actor, User $target): void

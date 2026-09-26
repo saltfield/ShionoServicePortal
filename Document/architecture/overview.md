@@ -11,16 +11,18 @@
       v  HTTP :8080
 [Nginx] --fastcgi--> [PHP-FPM 8.3] --pdo--> [MariaDB 11.4]
                            |
-              +------------+------------+
-              |                         |
-         [Scheduler]               [Mailpit]
-    schedule:work（自動請求）      開発メール
+              +------------+------------+------------+
+              |            |            |
+         [Scheduler]    [Queue]     [Mailpit]
+       schedule:work   queue:work   開発メール
+        （自動請求）   （通知メール）
 ```
 
 - アプリ公開は Docker 内 Nginx の **8080**。
 - 本番相当の TLS は上位リバースプロキシで実施。本スタックは平文 HTTP を想定。
 - `X-Forwarded-For` / `X-Forwarded-Proto` を Nginx・PHP で受け取る設定済み。
 - **自動請求**は `scheduler` コンテナ（またはホスト cron の `schedule:run`）が必須。手順は [deploy.md](deploy.md)。
+- **メール通知**は `queue` コンテナ（`queue:work`）が必須。手順は [phase13-setup.md](phase13-setup.md) / [deploy.md](deploy.md)。
 
 ## ディレクトリ役割
 
@@ -28,7 +30,7 @@
 |--------------|------|
 | `/Application` | Laravel ソース、マイグレーション、Livewire、テスト |
 | `/Document` | ER、IAM、BP階層、フェーズ計画／実装メモ、デプロイ手順 |
-| `/Develop` | docker-compose、Nginx / PHP / MariaDB / Scheduler 設定 |
+| `/Develop` | docker-compose、Nginx / PHP / MariaDB / Scheduler / Queue 設定 |
 
 ## 決定事項（Phase 1 合意）
 
@@ -86,5 +88,6 @@
 | 10 | 月次請求・キックバック・自動生成・生成履歴 | **完了** |
 | 11 | デザイン刷新（Bootstrap継続・トークン／全画面展開） | **完了** |
 | 12 | ロール割り当て・定義・ABACポリシー UI（Azure IAM 風） | **完了**（12-A / 12-B / 12-C） |
+| 13 | メール通知（チケット／価格申請／強制PW・オプトアウト・queue） | **完了** |
 
 計画・実装メモ: 各 `phaseN-plan.md` / `phaseN-setup.md`。デプロイは [deploy.md](deploy.md)。

@@ -392,9 +392,9 @@
                     </table>
                 </div>
                 {{ $items->links() }}
-                <p class="small text-muted">必須セットがある品目は、セット先も同時に選択してください。選択した品目のエンドユーザー価格は作成時に設定できます。</p>
+                <p class="small text-muted mb-0">必須セットがある品目は、セット先も同時に選択してください。選択した品目のエンドユーザー価格は作成時に設定できます。</p>
 
-                <div id="order-price-step" class="border rounded p-3 mb-3 bg-white">
+                <div id="order-price-step" class="border rounded p-3 mb-3 mt-4 bg-white">
                     <h2 class="h5 mb-2">価格承認申請</h2>
                     <p class="small text-muted mb-3">選択した品目の価格を確認し、必要なら特価申請を行ってオーダーを作成します。</p>
 
