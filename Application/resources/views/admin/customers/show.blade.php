@@ -158,7 +158,7 @@
                     <tr>
                         <td><code>{{ $user->login_id }}</code></td>
                         <td>{{ $user->name }}</td>
-                        <td><code>{{ $user->roles->first()?->code ?? '-' }}</code></td>
+                        <td><code class="small">{{ $user->roles->pluck('code')->implode(', ') ?: '-' }}</code></td>
                         <td>
                             @if ($user->is_active)
                                 <span class="badge text-bg-success">有効</span>

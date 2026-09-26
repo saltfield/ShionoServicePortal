@@ -8,6 +8,7 @@ use App\Domains\Iam\Services\AdminPrivilegeService;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\UserManagementService;
 use App\Http\Controllers\Concerns\ConfirmsUserDeletion;
+use App\Http\Controllers\Concerns\ManagesUserRoleAssignments;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
 use App\Models\Customer;
@@ -22,6 +23,12 @@ use InvalidArgumentException;
 class UserPrivilegeController extends Controller
 {
     use ConfirmsUserDeletion;
+    use ManagesUserRoleAssignments;
+
+    protected function userManagementGuard(): string
+    {
+        return 'admin';
+    }
 
     public function index(Request $request, AuthorizationService $authorization): View
     {
@@ -111,7 +118,7 @@ class UserPrivilegeController extends Controller
         return view('admin.users.create', [
             'routePrefix' => 'admin',
             'userType' => $type,
-            'roles' => $users->assignableRoleCodes($actor, $type),
+            'roles' => $users->assignableRoles($actor, $type),
             'businessPartners' => $partners,
             'customers' => Customer::query()->orderBy('code')->get(['id', 'code', 'name', 'managing_bp_id']),
             'selectedCustomerId' => $selectedCustomerId,
@@ -140,17 +147,24 @@ class UserPrivilegeController extends Controller
         $actor = $request->user('admin');
         $authorization->authorize($actor, 'iam.user.manage');
         $users->assertCanManageTarget($actor, $user);
-        $user->load('roles');
+        $user->load(['roles.permissions', 'businessPartner', 'customer']);
 
         $returnCustomerId = $request->filled('return_customer_id')
             ? (int) $request->input('return_customer_id')
             : ($user->user_type === UserType::Customer ? $user->customer_id : null);
         $returnBpId = $request->filled('return_bp_id') ? (int) $request->input('return_bp_id') : null;
 
+        $assignedCodes = $user->roles->pluck('code')->all();
+        $assignableRoles = $users->assignableRoles($actor, $user->user_type)
+            ->reject(fn ($role) => in_array($role->code, $assignedCodes, true))
+            ->values();
+
         return view('admin.users.edit', [
             'routePrefix' => 'admin',
             'managedUser' => $user,
-            'roles' => $users->assignableRoleCodes($actor, $user->user_type),
+            'roles' => $users->assignableRoles($actor, $user->user_type),
+            'assignableRoles' => $assignableRoles,
+            'scopeLabel' => $users->scopeLabelFor($user),
             'deleteConfirmationCode' => $this->issueUserDeleteConfirmationCode($user),
             'returnCustomerId' => $returnCustomerId,
             'returnBpId' => $returnBpId,
@@ -241,13 +255,13 @@ class UserPrivilegeController extends Controller
         $rules = [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
-            'role_code' => ['required', 'string'],
             'is_active' => ['nullable', 'boolean'],
             'must_change_password' => ['nullable', 'boolean'],
             'password' => [$creating ? 'required' : 'nullable', 'string', 'min:8', 'confirmed'],
         ];
 
         if ($creating) {
+            $rules['role_code'] = ['required', 'string'];
             $rules['user_type'] = ['required', Rule::enum(UserType::class)];
             $rules['login_id'] = ['required', 'string', 'max:64'];
             if ($type === UserType::Bp) {

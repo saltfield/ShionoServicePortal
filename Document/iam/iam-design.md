@@ -1,5 +1,7 @@
 # IAM 設計（RBAC + ABAC）
 
+運用手順（画面の使い方）は **[iam-operations-manual.md](iam-operations-manual.md)** を参照。
+
 ## 目標
 
 Azure IAM に近い柔軟性を持つ。
@@ -200,7 +202,9 @@ User ──< UserRole >── Role ──< RolePermission >── Permission
 | scope_type | `system` / `bp` / `customer` |
 | scope_id | 対象ID（system は NULL） |
 
-Phase 2 初期は「1ユーザー1BP」のため、BPロールの `scope_id` は概ね `users.bp_id` と一致。将来の拡張余地を残す。
+- **1ユーザーに複数ロール可**（実効権限は和集合）。UI は Azure IAM 風の「ロール割り当て」として [Phase 12](../architecture/phase12-plan.md) で整備する。
+- Phase 2 初期は「1ユーザー1BP」のため、BPロールの `scope_id` は概ね `users.bp_id` と一致。任意リソースへのスコープ割当は後続。
+- パーミッションのユーザー直接付与（`user_permission`）は行わない。
 
 **RBAC の意味**: アクション実行の **前提条件**（その permission を持っているか）。  
 最終許可は ABAC とデータスコープ評価後に決定。

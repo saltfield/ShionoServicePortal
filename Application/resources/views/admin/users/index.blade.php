@@ -141,7 +141,7 @@
                     $managingBpName = $bp?->name ?? '-';
                     $orgCodeLabel = $isCustomerTab ? 'CN' : 'BPN';
                     $orgNameLabel = $isCustomerTab ? 'カスタマー名' : 'BP名';
-                    $roleCode = $user->roles->first()?->code ?? '-';
+                    $roleLabels = $user->roles->map(fn ($role) => $role->code)->implode(', ') ?: '-';
                 @endphp
                 <tr>
                     <td><code>{{ $user->login_id }}</code></td>
@@ -154,7 +154,7 @@
                         <td>{{ $orgName }}</td>
                         <td>{{ $managingBpName }}</td>
                     @endif
-                    <td><code>{{ $roleCode }}</code></td>
+                    <td><code class="small">{{ $roleLabels }}</code></td>
                     <td>
                         @if ($user->is_active)
                             <span class="badge text-bg-success">有効</span>

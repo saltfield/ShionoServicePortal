@@ -391,12 +391,18 @@ it('allows admin http create and edit flows', function () {
     $this->put(route('admin.users.update', $created), [
         'name' => 'HTTP BP Updated',
         'email' => 'updated@example.com',
-        'role_code' => 'bp_sales',
         'is_active' => '1',
     ])->assertRedirect(route('admin.users.index', ['tab' => 'bp']));
 
     expect($created->fresh()->name)->toBe('HTTP BP Updated')
-        ->and($created->fresh()->roles->first()?->code)->toBe('bp_sales');
+        ->and($created->fresh()->roles->pluck('code')->all())->toBe(['bp_support']);
+
+    $this->post(route('admin.users.roles.assign', $created), [
+        'role_code' => 'bp_sales',
+    ])->assertRedirect();
+
+    expect($created->fresh()->roles->pluck('code')->sort()->values()->all())
+        ->toBe(['bp_sales', 'bp_support']);
 });
 
 it('allows bp owner http user management within scope', function () {

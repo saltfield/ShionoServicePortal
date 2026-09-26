@@ -111,12 +111,18 @@
             </div>
         @endif
         <div class="mb-3">
-            <label class="form-label" for="role_code">ロール</label>
+            <label class="form-label" for="role_code">初期ロール</label>
             <select name="role_code" id="role_code" class="form-select" required>
                 @foreach ($roles as $role)
-                    <option value="{{ $role }}" @selected(old('role_code') === $role)>{{ $role }}</option>
+                    @php
+                        $code = is_object($role) ? $role->code : $role;
+                        $label = is_object($role) ? ($role->name.'（'.$role->code.'）') : $role;
+                        $perms = is_object($role) ? $role->permissions->pluck('code')->implode(', ') : '';
+                    @endphp
+                    <option value="{{ $code }}" data-permissions="{{ $perms }}" @selected(old('role_code') === $code)>{{ $label }}</option>
                 @endforeach
             </select>
+            <p class="form-text mb-0" id="create_role_permissions">作成後、編集画面で追加のロールを割り当てできます。</p>
         </div>
         <div class="mb-3">
             <label class="form-label" for="password">初期パスワード</label>
@@ -137,3 +143,23 @@
         <button class="btn btn-primary" type="submit">作成</button>
     </form>
 @endsection
+
+@push('scripts')
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const select = document.getElementById('role_code');
+        const preview = document.getElementById('create_role_permissions');
+        if (!select || !preview) return;
+        const base = '作成後、編集画面で追加のロールを割り当てできます。';
+        const sync = () => {
+            const option = select.selectedOptions[0];
+            const perms = option?.dataset?.permissions || '';
+            preview.textContent = perms
+                ? base + ' 含まれる権限: ' + perms
+                : base;
+        };
+        select.addEventListener('change', sync);
+        sync();
+    });
+</script>
+@endpush

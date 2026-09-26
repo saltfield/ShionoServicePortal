@@ -36,7 +36,10 @@
         </ol>
     </nav>
     <h1 class="ssp-page-title mb-3">ユーザー編集</h1>
-    @if ($errors->any())
+    @if (session('status') && ! str_contains(session('status'), 'ロール'))
+        <div class="alert alert-success">{{ session('status') }}</div>
+    @endif
+    @if ($errors->any() && ! $errors->has('role_code'))
         <div class="alert alert-danger">{{ $errors->first() }}</div>
     @endif
     <form method="POST" action="{{ route($prefix.'.users.update', $managedUser) }}" class="card card-body mb-4" style="max-width:40rem">
@@ -65,14 +68,6 @@
             <input type="email" name="email" id="email" class="form-control" value="{{ old('email', $managedUser->email) }}">
         </div>
         <div class="mb-3">
-            <label class="form-label" for="role_code">ロール</label>
-            <select name="role_code" id="role_code" class="form-select" required>
-                @foreach ($roles as $role)
-                    <option value="{{ $role }}" @selected(old('role_code', $managedUser->roles->first()?->code) === $role)>{{ $role }}</option>
-                @endforeach
-            </select>
-        </div>
-        <div class="mb-3">
             <label class="form-label" for="password">パスワード（変更時のみ）</label>
             <input type="password" name="password" id="password" class="form-control">
         </div>
@@ -90,6 +85,15 @@
         </div>
         <button class="btn btn-primary" type="submit">保存</button>
     </form>
+
+    @include('partials.users.role-assignments', [
+        'managedUser' => $managedUser,
+        'assignableRoles' => $assignableRoles ?? collect(),
+        'scopeLabel' => $scopeLabel ?? '—',
+        'prefix' => $prefix,
+        'returnCustomerId' => $returnCustomerId ?? null,
+        'returnBpId' => $returnBpId ?? null,
+    ])
 
     <div class="d-flex gap-2">
         @if ($deleteConfirmationCode ?? null)

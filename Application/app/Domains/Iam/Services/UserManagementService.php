@@ -10,6 +10,7 @@ use App\Models\BusinessPartner;
 use App\Models\Customer;
 use App\Models\Role;
 use App\Models\User;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use InvalidArgumentException;
@@ -52,7 +53,7 @@ class UserManagementService
                 'must_change_password' => (bool) ($data['must_change_password'] ?? false),
             ]);
 
-            $this->syncPrimaryRole($user, (string) $data['role_code']);
+            $this->attachRole($user, (string) $data['role_code']);
 
             $this->auditLogger->log(
                 'iam',
@@ -62,7 +63,11 @@ class UserManagementService
                 targetUser: $user,
                 targetType: User::class,
                 targetId: $user->id,
-                meta: ['login_id' => $user->login_id, 'user_type' => $type->value],
+                meta: [
+                    'login_id' => $user->login_id,
+                    'user_type' => $type->value,
+                    'role_code' => (string) $data['role_code'],
+                ],
             );
 
             return $user;
@@ -95,10 +100,6 @@ class UserManagementService
             }
 
             $target->save();
-
-            if (! empty($data['role_code'])) {
-                $this->syncPrimaryRole($target, (string) $data['role_code']);
-            }
 
             $this->auditLogger->log(
                 'iam',
@@ -138,17 +139,117 @@ class UserManagementService
         );
     }
 
+    public function assignRoleToUser(User $actor, User $target, string $roleCode): void
+    {
+        $this->authorization->authorize($actor, 'iam.user.manage');
+        $this->assertCanManageTarget($actor, $target);
+        $target->loadMissing('roles');
+
+        if (! in_array($roleCode, $this->assignableRoleCodes($actor, $target->user_type), true)) {
+            throw new InvalidArgumentException('指定できないロールです。');
+        }
+
+        if ($target->roles->contains(fn (Role $role) => $role->code === $roleCode)) {
+            throw new InvalidArgumentException('既に割り当て済みのロールです。');
+        }
+
+        $this->attachRole($target, $roleCode);
+
+        $this->auditLogger->log(
+            'iam',
+            'role.assign',
+            'success',
+            $actor,
+            targetUser: $target,
+            targetType: User::class,
+            targetId: $target->id,
+            meta: ['login_id' => $target->login_id, 'role_code' => $roleCode],
+        );
+    }
+
+    public function revokeRoleFromUser(User $actor, User $target, string $roleCode): void
+    {
+        $this->authorization->authorize($actor, 'iam.user.manage');
+        $this->assertCanManageTarget($actor, $target);
+
+        if (! in_array($roleCode, $this->assignableRoleCodes($actor, $target->user_type), true)) {
+            throw new InvalidArgumentException('解除できないロールです。');
+        }
+
+        $target->loadMissing('roles');
+        if ($target->roles->count() <= 1) {
+            throw new InvalidArgumentException('最後のロールは解除できません。');
+        }
+
+        if (! $target->roles->contains(fn (Role $role) => $role->code === $roleCode)) {
+            throw new InvalidArgumentException('割り当てられていないロールです。');
+        }
+
+        [$scope, $scopeId] = $this->scopeFor($target);
+        $this->rbac->revokeRole($target, $roleCode, $scope, $scopeId);
+
+        $this->auditLogger->log(
+            'iam',
+            'role.revoke',
+            'success',
+            $actor,
+            targetUser: $target,
+            targetType: User::class,
+            targetId: $target->id,
+            meta: ['login_id' => $target->login_id, 'role_code' => $roleCode],
+        );
+    }
+
     /**
      * @return list<string>
      */
     public function assignableRoleCodes(User $actor, UserType $forType): array
     {
-        return match ($forType) {
-            UserType::Admin => $actor->user_type === UserType::Admin ? ['system_admin'] : [],
-            UserType::Bp => $actor->user_type === UserType::Customer
-                ? []
-                : ['bp_owner', 'bp_sales', 'bp_support'],
-            UserType::Customer => ['customer_owner', 'customer_member'],
+        if ($forType === UserType::Admin && $actor->user_type !== UserType::Admin) {
+            return [];
+        }
+        if ($forType === UserType::Bp && $actor->user_type === UserType::Customer) {
+            return [];
+        }
+
+        $scope = match ($forType) {
+            UserType::Admin => RoleScope::System,
+            UserType::Bp => RoleScope::Bp,
+            UserType::Customer => RoleScope::Customer,
+        };
+
+        return Role::query()
+            ->where('scope', $scope->value)
+            ->orderBy('code')
+            ->pluck('code')
+            ->all();
+    }
+
+    /**
+     * @return Collection<int, Role>
+     */
+    public function assignableRoles(User $actor, UserType $forType): Collection
+    {
+        $codes = $this->assignableRoleCodes($actor, $forType);
+        if ($codes === []) {
+            return collect();
+        }
+
+        return Role::query()
+            ->with('permissions')
+            ->whereIn('code', $codes)
+            ->orderBy('code')
+            ->get();
+    }
+
+    public function scopeLabelFor(User $user): string
+    {
+        $user->loadMissing(['businessPartner', 'customer']);
+
+        return match ($user->user_type) {
+            UserType::Admin => 'システム',
+            UserType::Bp => 'BP '.($user->businessPartner?->code ?? (string) $user->bp_id),
+            UserType::Customer => 'CN '.($user->customer?->code ?? (string) $user->customer_id),
         };
     }
 
@@ -263,18 +364,22 @@ class UserManagementService
         };
     }
 
-    private function syncPrimaryRole(User $user, string $roleCode): void
+    private function attachRole(User $user, string $roleCode): void
     {
         $role = Role::query()->where('code', $roleCode)->firstOrFail();
-
-        DB::table('user_role')->where('user_id', $user->id)->delete();
-
-        [$scope, $scopeId] = match ($user->user_type) {
-            UserType::Admin => [RoleScope::System, null],
-            UserType::Bp => [RoleScope::Bp, $user->bp_id],
-            UserType::Customer => [RoleScope::Customer, $user->customer_id],
-        };
-
+        [$scope, $scopeId] = $this->scopeFor($user);
         $this->rbac->assignRole($user, $role, $scope, $scopeId);
+    }
+
+    /**
+     * @return array{0: RoleScope, 1: int|null}
+     */
+    private function scopeFor(User $user): array
+    {
+        return match ($user->user_type) {
+            UserType::Admin => [RoleScope::System, null],
+            UserType::Bp => [RoleScope::Bp, $user->bp_id !== null ? (int) $user->bp_id : null],
+            UserType::Customer => [RoleScope::Customer, $user->customer_id !== null ? (int) $user->customer_id : null],
+        };
     }
 }

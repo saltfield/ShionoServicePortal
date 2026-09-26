@@ -31,12 +31,17 @@
             <input type="email" name="email" id="email" class="form-control" value="{{ old('email') }}">
         </div>
         <div class="mb-3">
-            <label class="form-label" for="role_code">ロール</label>
+            <label class="form-label" for="role_code">初期ロール</label>
             <select name="role_code" id="role_code" class="form-select" required>
                 @foreach ($roles as $role)
-                    <option value="{{ $role }}" @selected(old('role_code', 'customer_member') === $role)>{{ $role }}</option>
+                    @php
+                        $code = is_object($role) ? $role->code : $role;
+                        $label = is_object($role) ? ($role->name.'（'.$role->code.'）') : $role;
+                    @endphp
+                    <option value="{{ $code }}" @selected(old('role_code', 'customer_member') === $code)>{{ $label }}</option>
                 @endforeach
             </select>
+            <p class="form-text mb-0">作成後、編集画面で追加のロールを割り当てできます。</p>
         </div>
         <div class="mb-3">
             <label class="form-label" for="password">初期パスワード</label>

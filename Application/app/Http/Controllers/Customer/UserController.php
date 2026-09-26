@@ -7,6 +7,7 @@ use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\UserManagementService;
 use App\Http\Controllers\Concerns\ConfirmsUserDeletion;
+use App\Http\Controllers\Concerns\ManagesUserRoleAssignments;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -18,6 +19,12 @@ use InvalidArgumentException;
 class UserController extends Controller
 {
     use ConfirmsUserDeletion;
+    use ManagesUserRoleAssignments;
+
+    protected function userManagementGuard(): string
+    {
+        return 'customer';
+    }
 
     public function index(Request $request, AuthorizationService $authorization): View
     {
@@ -45,7 +52,7 @@ class UserController extends Controller
 
         return view('customer.users.create', [
             'routePrefix' => 'customer',
-            'roles' => $users->assignableRoleCodes($actor, UserType::Customer),
+            'roles' => $users->assignableRoles($actor, UserType::Customer),
             'customer' => $actor->customer,
         ]);
     }
@@ -73,12 +80,19 @@ class UserController extends Controller
         $actor = $request->user('customer');
         $authorization->authorize($actor, 'iam.user.manage');
         $users->assertCanManageTarget($actor, $user);
-        $user->load('roles');
+        $user->load(['roles.permissions', 'customer']);
+
+        $assignedCodes = $user->roles->pluck('code')->all();
+        $assignableRoles = $users->assignableRoles($actor, UserType::Customer)
+            ->reject(fn ($role) => in_array($role->code, $assignedCodes, true))
+            ->values();
 
         return view('customer.users.edit', [
             'routePrefix' => 'customer',
             'managedUser' => $user,
-            'roles' => $users->assignableRoleCodes($actor, UserType::Customer),
+            'roles' => $users->assignableRoles($actor, UserType::Customer),
+            'assignableRoles' => $assignableRoles,
+            'scopeLabel' => $users->scopeLabelFor($user),
             'deleteConfirmationCode' => $this->issueUserDeleteConfirmationCode($user),
         ]);
     }
@@ -121,13 +135,13 @@ class UserController extends Controller
         $rules = [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
-            'role_code' => ['required', 'string'],
             'is_active' => ['nullable', 'boolean'],
             'must_change_password' => ['nullable', 'boolean'],
             'password' => [$creating ? 'required' : 'nullable', 'string', 'min:8', 'confirmed'],
         ];
 
         if ($creating) {
+            $rules['role_code'] = ['required', 'string'];
             $rules['login_id'] = ['required', 'string', 'max:64'];
         }
 

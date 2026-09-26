@@ -33,7 +33,7 @@
                     <tr>
                         <td class="font-monospace">{{ $user->login_id }}</td>
                         <td>{{ $user->name }}</td>
-                        <td>{{ $user->roles->first()?->code ?? '—' }}</td>
+                        <td class="small"><code>{{ $user->roles->pluck('code')->implode(', ') ?: '—' }}</code></td>
                         <td>{{ $user->is_active ? '有効' : '無効' }}</td>
                         <td>{{ $user->two_factor_confirmed_at ? '設定済' : '未設定' }}</td>
                         <td class="text-end">

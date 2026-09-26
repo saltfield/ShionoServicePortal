@@ -20,6 +20,8 @@ use App\Http\Controllers\Admin\KickbackInvoiceController;
 use App\Http\Controllers\Admin\ItemController;
 use App\Http\Controllers\Admin\ItemDocumentController;
 use App\Http\Controllers\Admin\ItemTypeController;
+use App\Http\Controllers\Admin\PolicyController;
+use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\SiteController;
 use App\Http\Controllers\Admin\UserPrivilegeController;
 use App\Http\Controllers\Admin\WholesalePriceController;
@@ -141,6 +143,8 @@ foreach (
                     Route::get('users/{user}/edit', [CustomerUserController::class, 'edit'])->name('users.edit');
                     Route::put('users/{user}', [CustomerUserController::class, 'update'])->name('users.update');
                     Route::delete('users/{user}', [CustomerUserController::class, 'destroy'])->name('users.destroy');
+                    Route::post('users/{user}/roles', [CustomerUserController::class, 'assignRole'])->name('users.roles.assign');
+                    Route::delete('users/{user}/roles', [CustomerUserController::class, 'revokeRole'])->name('users.roles.revoke');
                 }
 
                 if ($guard === 'admin') {
@@ -150,9 +154,25 @@ foreach (
                     Route::get('users/{user}/edit', [UserPrivilegeController::class, 'edit'])->name('users.edit');
                     Route::put('users/{user}', [UserPrivilegeController::class, 'update'])->name('users.update');
                     Route::delete('users/{user}', [UserPrivilegeController::class, 'destroy'])->name('users.destroy');
+                    Route::post('users/{user}/roles', [UserPrivilegeController::class, 'assignRole'])->name('users.roles.assign');
+                    Route::delete('users/{user}/roles', [UserPrivilegeController::class, 'revokeRole'])->name('users.roles.revoke');
                     Route::post('users/{user}/force-password', [UserPrivilegeController::class, 'forcePassword'])->name('users.force-password');
                     Route::post('users/{user}/reset-2fa', [UserPrivilegeController::class, 'forceDisableTwoFactor'])->name('users.reset-2fa');
                     Route::post('users/{user}/clear-reset-2fa', [UserPrivilegeController::class, 'clearForceDisableTwoFactor'])->name('users.clear-reset-2fa');
+
+                    Route::get('roles', [RoleController::class, 'index'])->name('roles.index');
+                    Route::get('roles/create', [RoleController::class, 'create'])->name('roles.create');
+                    Route::post('roles', [RoleController::class, 'store'])->name('roles.store');
+                    Route::get('roles/{role}/edit', [RoleController::class, 'edit'])->name('roles.edit');
+                    Route::put('roles/{role}', [RoleController::class, 'update'])->name('roles.update');
+                    Route::delete('roles/{role}', [RoleController::class, 'destroy'])->name('roles.destroy');
+
+                    Route::get('policies', [PolicyController::class, 'index'])->name('policies.index');
+                    Route::get('policies/create', [PolicyController::class, 'create'])->name('policies.create');
+                    Route::post('policies', [PolicyController::class, 'store'])->name('policies.store');
+                    Route::get('policies/{policy}/edit', [PolicyController::class, 'edit'])->name('policies.edit');
+                    Route::put('policies/{policy}', [PolicyController::class, 'update'])->name('policies.update');
+                    Route::delete('policies/{policy}', [PolicyController::class, 'destroy'])->name('policies.destroy');
 
                     Route::get('business-partners', [BusinessPartnerController::class, 'index'])->name('business-partners.index');
                     Route::get('business-partners/create', [BusinessPartnerController::class, 'create'])->name('business-partners.create');
@@ -273,6 +293,8 @@ foreach (
                     Route::get('users/{user}/edit', [BpUserController::class, 'edit'])->name('users.edit');
                     Route::put('users/{user}', [BpUserController::class, 'update'])->name('users.update');
                     Route::delete('users/{user}', [BpUserController::class, 'destroy'])->name('users.destroy');
+                    Route::post('users/{user}/roles', [BpUserController::class, 'assignRole'])->name('users.roles.assign');
+                    Route::delete('users/{user}/roles', [BpUserController::class, 'revokeRole'])->name('users.roles.revoke');
 
                     Route::get('business-partners', [BpBusinessPartnerController::class, 'index'])->name('business-partners.index');
                     Route::get('business-partners/create', [BpBusinessPartnerController::class, 'create'])->name('business-partners.create');

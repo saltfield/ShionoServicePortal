@@ -88,6 +88,8 @@ final class PortalNavigation
                     ],
                 ],
                 ['label' => 'ユーザー管理', 'route' => 'admin.users.index', 'permission' => 'iam.user.manage'],
+                ['label' => 'ロール管理', 'route' => 'admin.roles.index', 'permission' => 'iam.role.manage'],
+                ['label' => 'ABACポリシー', 'route' => 'admin.policies.index', 'permission' => 'iam.policy.manage'],
                 ['label' => '監査ログ', 'route' => 'admin.audit-logs.index', 'permission' => 'audit.log.view'],
             ],
             'bp' => [

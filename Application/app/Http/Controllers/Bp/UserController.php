@@ -8,6 +8,7 @@ use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\UserManagementService;
 use App\Http\Controllers\Concerns\ConfirmsUserDeletion;
+use App\Http\Controllers\Concerns\ManagesUserRoleAssignments;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
 use App\Models\Customer;
@@ -22,6 +23,12 @@ use InvalidArgumentException;
 class UserController extends Controller
 {
     use ConfirmsUserDeletion;
+    use ManagesUserRoleAssignments;
+
+    protected function userManagementGuard(): string
+    {
+        return 'bp';
+    }
 
     public function index(Request $request, AuthorizationService $authorization, BpHierarchyService $hierarchy): View
     {
@@ -90,7 +97,7 @@ class UserController extends Controller
         return view('admin.users.create', [
             'routePrefix' => 'bp',
             'userType' => $type,
-            'roles' => $users->assignableRoleCodes($actor, $type),
+            'roles' => $users->assignableRoles($actor, $type),
             'businessPartners' => $selectedBpId
                 ? BusinessPartner::query()->whereKey($selectedBpId)->get(['id', 'code', 'name'])
                 : collect(),
@@ -124,7 +131,7 @@ class UserController extends Controller
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'iam.user.manage');
         $users->assertCanManageTarget($actor, $user);
-        $user->load('roles');
+        $user->load(['roles.permissions', 'businessPartner', 'customer']);
 
         $returnCustomerId = $request->filled('return_customer_id')
             ? (int) $request->input('return_customer_id')
@@ -133,10 +140,17 @@ class UserController extends Controller
             ? (int) $request->input('return_bp_id')
             : null;
 
+        $assignedCodes = $user->roles->pluck('code')->all();
+        $assignableRoles = $users->assignableRoles($actor, $user->user_type)
+            ->reject(fn ($role) => in_array($role->code, $assignedCodes, true))
+            ->values();
+
         return view('admin.users.edit', [
             'routePrefix' => 'bp',
             'managedUser' => $user,
-            'roles' => $users->assignableRoleCodes($actor, $user->user_type),
+            'roles' => $users->assignableRoles($actor, $user->user_type),
+            'assignableRoles' => $assignableRoles,
+            'scopeLabel' => $users->scopeLabelFor($user),
             'deleteConfirmationCode' => $this->issueUserDeleteConfirmationCode($user),
             'returnCustomerId' => $returnCustomerId,
             'returnBpId' => $returnBpId,
@@ -221,13 +235,13 @@ class UserController extends Controller
         $rules = [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
-            'role_code' => ['required', 'string'],
             'is_active' => ['nullable', 'boolean'],
             'must_change_password' => ['nullable', 'boolean'],
             'password' => [$creating ? 'required' : 'nullable', 'string', 'min:8', 'confirmed'],
         ];
 
         if ($creating) {
+            $rules['role_code'] = ['required', 'string'];
             $rules['user_type'] = ['required', Rule::in([UserType::Bp->value, UserType::Customer->value])];
             $rules['login_id'] = ['required', 'string', 'max:64'];
             if ($type === UserType::Bp) {
