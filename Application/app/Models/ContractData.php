@@ -18,6 +18,14 @@ class ContractData extends Model
         'sort_order',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            // APP_KEY 依存。DB 直読みは不可・値での SQL 検索は不可（画面・Eloquent 経由は平文）
+            'value' => 'encrypted',
+        ];
+    }
+
     public function contract(): BelongsTo
     {
         return $this->belongsTo(Contract::class);

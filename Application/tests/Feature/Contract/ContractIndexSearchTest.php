@@ -7,6 +7,7 @@ use App\Models\ContractItemData;
 use Database\Seeders\AbacSeeder;
 use Database\Seeders\IamSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
@@ -45,7 +46,7 @@ it('filters contracts by field search with and/or and wildcards', function () {
     $this->actingAs($fx['admin'], 'admin')
         ->get(route('admin.contracts.index', [
             'contract_code' => 'CTRSEARCH*',
-            'data_value' => 'CAF123*',
+            'data_name' => '回線番号',
             'match' => 'and',
         ]))
         ->assertOk()
@@ -55,12 +56,12 @@ it('filters contracts by field search with and/or and wildcards', function () {
     $this->actingAs($fx['admin'], 'admin')
         ->get(route('admin.contracts.index', [
             'contract_code' => 'NOMATCH',
-            'data_value' => 'CAF999*',
+            'data_name' => '回線番号',
             'match' => 'or',
         ]))
         ->assertOk()
-        ->assertSee('CTROTHER002')
-        ->assertDontSee('CTRSEARCH001');
+        ->assertSee('CTRSEARCH001')
+        ->assertSee('CTROTHER002');
 
     $this->actingAs($fx['admin'], 'admin')
         ->get(route('admin.contracts.index', [
@@ -80,4 +81,23 @@ it('filters contracts by field search with and/or and wildcards', function () {
         ->assertOk()
         ->assertSee('CTRSEARCH001')
         ->assertSee('CTROTHER002');
+});
+
+it('stores contract data values encrypted at rest while exposing plaintext via model', function () {
+    $fx = contractFixture();
+    $service = app(ContractService::class);
+    $contract = $service->createDraft($fx['bpUser'], $fx['site'], [$fx['initial']->id, $fx['running']->id]);
+    $app = $service->submitPriceApproval($fx['bpUser'], $contract);
+    $service->decidePriceApproval($fx['parentUser'], $app, true);
+
+    $service->upsertContractData($fx['bpUser'], $contract->fresh(), [
+        ['name' => '回線番号', 'replace_code' => 'caf_cop', 'value' => 'SECRET-LINE-001'],
+    ]);
+
+    $row = $contract->fresh()->dataRows->first();
+    expect($row->value)->toBe('SECRET-LINE-001');
+
+    $raw = DB::table('contract_data')->where('id', $row->id)->value('value');
+    expect($raw)->not->toBe('SECRET-LINE-001')
+        ->and($raw)->not->toContain('SECRET-LINE-001');
 });

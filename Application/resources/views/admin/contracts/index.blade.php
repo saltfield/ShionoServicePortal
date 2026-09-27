@@ -17,7 +17,6 @@
             'item_code' => '',
             'item_name' => '',
             'data_name' => '',
-            'data_value' => '',
             'match' => 'and',
         ];
         $filterQuery = collect($filters)
@@ -136,10 +135,6 @@
                             <div class="col-md-3 col-lg-2">
                                 <label class="form-label small mb-1" for="data_name">データ名</label>
                                 <input type="text" id="data_name" name="data_name" value="{{ $filters['data_name'] }}" class="form-control form-control-sm" placeholder="例: 回線番号">
-                            </div>
-                            <div class="col-md-3 col-lg-2">
-                                <label class="form-label small mb-1" for="data_value">データ値</label>
-                                <input type="text" id="data_value" name="data_value" value="{{ $filters['data_value'] }}" class="form-control form-control-sm" placeholder="例: CAF*">
                             </div>
                             <div class="col-md-3 col-lg-2">
                                 <label class="form-label small mb-1" for="match">条件結合</label>

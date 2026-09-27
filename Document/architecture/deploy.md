@@ -62,7 +62,7 @@ cp .env.example .env
 | `APP_NAME` | 例: `SSP`（メール差出人名など） |
 | `APP_ENV` | 本番は `production` |
 | `APP_DEBUG` | 本番は `false` |
-| `APP_KEY` | 下記 `key:generate` で生成 |
+| `APP_KEY` | 下記 `key:generate` で生成。**契約データの値暗号化に使用**。失うと既存 `value` を復号できないためバックアップ必須 |
 | `APP_URL` | 公開 URL（リバースプロキシの HTTPS URL）。**メール本文のリンク／ボタンもこの値から生成**される |
 | `ADMIN_SEED_*` | 本番初回の `ProductionBootstrapSeeder` 用（`LOGIN_ID` / `PASSWORD` / `NAME` / `EMAIL`）。シード後は `PASSWORD` 削除推奨 |
 | `APP_TIMEZONE` | `Asia/Tokyo` |

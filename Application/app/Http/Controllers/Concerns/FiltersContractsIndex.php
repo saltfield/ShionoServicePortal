@@ -18,7 +18,6 @@ trait FiltersContractsIndex
      *     item_code: string,
      *     item_name: string,
      *     data_name: string,
-     *     data_value: string,
      *     match: 'and'|'or'
      * }
      */
@@ -35,7 +34,6 @@ trait FiltersContractsIndex
             'item_code' => trim((string) $request->input('item_code', '')),
             'item_name' => trim((string) $request->input('item_name', '')),
             'data_name' => trim((string) $request->input('data_name', '')),
-            'data_value' => trim((string) $request->input('data_value', '')),
             'match' => in_array($match, ['and', 'or'], true) ? $match : 'and',
         ];
     }
@@ -50,7 +48,6 @@ trait FiltersContractsIndex
      *     item_code: string,
      *     item_name: string,
      *     data_name: string,
-     *     data_value: string,
      *     match: 'and'|'or'
      * }  $filters
      */
@@ -119,14 +116,6 @@ trait FiltersContractsIndex
             });
         }
 
-        if ($filters['data_value'] !== '') {
-            $pattern = $this->contractSearchLikePattern($filters['data_value']);
-            $conditions[] = fn (Builder $q) => $q->where(function (Builder $inner) use ($pattern) {
-                $inner->whereHas('dataRows', fn (Builder $row) => $row->where('value', 'like', $pattern))
-                    ->orWhereHas('items.dataRows', fn (Builder $row) => $row->where('value', 'like', $pattern));
-            });
-        }
-
         if ($conditions === []) {
             return $query;
         }
@@ -156,7 +145,6 @@ trait FiltersContractsIndex
      *     item_code: string,
      *     item_name: string,
      *     data_name: string,
-     *     data_value: string,
      *     match: 'and'|'or'
      * }  $filters
      * @return array<string, string>
