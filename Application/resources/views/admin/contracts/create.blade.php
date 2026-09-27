@@ -328,8 +328,13 @@
                                             name="item_ids[]"
                                             value="{{ $item->id }}"
                                             id="item_{{ $item->id }}"
+                                            data-item-name="{{ $item->name }}"
+                                            data-item-code="{{ $item->code }}"
                                             data-type-name="{{ $typeName }}"
                                             data-type-message="{{ $typeMessage }}"
+                                            data-required-item-id="{{ $item->required_item_id ?: '' }}"
+                                            data-required-item-name="{{ $item->requiredItem?->name ?? '' }}"
+                                            data-required-item-code="{{ $item->requiredItem?->code ?? '' }}"
                                         >
                                     </td>
                                     <td><label for="item_{{ $item->id }}" class="mb-0"><code>{{ $item->code }}</code></label></td>
@@ -392,7 +397,7 @@
                     </table>
                 </div>
                 {{ $items->links() }}
-                <p class="small text-muted mb-0">必須セットがある品目は、セット先も同時に選択してください。選択した品目のエンドユーザー価格は作成時に設定できます。</p>
+                <p class="small text-muted mb-0">必須セットがある品目を選ぶと、セット先も自動で選択されます。選択した品目のエンドユーザー価格は作成時に設定できます。</p>
 
                 <div id="order-price-step" class="border rounded p-3 mb-3 mt-4 bg-white">
                     <h2 class="h5 mb-2">価格承認申請</h2>
@@ -432,6 +437,18 @@
                 </div>
             </dialog>
 
+            <dialog id="requiredItemDialog" class="border-0 rounded-3 shadow p-0" style="max-width: 32rem; width: calc(100% - 2rem);">
+                <div class="p-4">
+                    <h2 class="h5 mb-2">必須セット品目を追加します</h2>
+                    <p class="mb-2" id="requiredItemDialogLead"></p>
+                    <ul id="requiredItemDialogList" class="mb-3 ps-3"></ul>
+                    <p class="small text-muted mb-3 d-none" id="requiredItemDialogMissing"></p>
+                    <div class="d-flex justify-content-end">
+                        <button type="button" class="btn btn-primary" id="requiredItemDialogOk">OK</button>
+                    </div>
+                </div>
+            </dialog>
+
             <script>
                 (function () {
                     const toggle = document.getElementById('special_price_requested');
@@ -449,11 +466,17 @@
                     const descriptionMeta = document.getElementById('itemDescriptionMeta');
                     const descriptionBody = document.getElementById('itemDescriptionBody');
                     const descriptionClose = document.getElementById('itemDescriptionClose');
+                    const requiredDialog = document.getElementById('requiredItemDialog');
+                    const requiredDialogLead = document.getElementById('requiredItemDialogLead');
+                    const requiredDialogList = document.getElementById('requiredItemDialogList');
+                    const requiredDialogMissing = document.getElementById('requiredItemDialogMissing');
+                    const requiredDialogOk = document.getElementById('requiredItemDialogOk');
                     const wizardRoot = document.getElementById('order-wizard-steps');
                     const priceStepPanel = document.getElementById('order-price-step');
                     let wizardStep = wizardRoot
                         ? parseInt(wizardRoot.getAttribute('data-base-step') || '3', 10)
                         : 3;
+                    let suppressingRequiredLookup = false;
 
                     function setWizardStep(step) {
                         wizardStep = step;
@@ -550,11 +573,98 @@
                         syncRowInputs();
                     }
 
+                    function collectRequiredSelections(startCheck) {
+                        const toCheck = [];
+                        const missing = [];
+                        const seen = new Set();
+                        let cursor = startCheck;
+                        let currentId = (cursor.getAttribute('data-required-item-id') || '').trim();
+
+                        while (currentId && !seen.has(currentId)) {
+                            seen.add(currentId);
+                            const requiredCheck = document.getElementById('item_' + currentId);
+                            if (!requiredCheck) {
+                                missing.push({
+                                    id: currentId,
+                                    name: cursor.getAttribute('data-required-item-name') || '',
+                                    code: cursor.getAttribute('data-required-item-code') || '',
+                                });
+                                break;
+                            }
+                            if (!requiredCheck.checked) {
+                                toCheck.push(requiredCheck);
+                            }
+                            cursor = requiredCheck;
+                            currentId = (requiredCheck.getAttribute('data-required-item-id') || '').trim();
+                        }
+
+                        return { toCheck: toCheck, missing: missing };
+                    }
+
+                    function showRequiredDialog(sourceCheck, result) {
+                        if (!requiredDialog || !requiredDialogList) {
+                            return;
+                        }
+                        const sourceName = (sourceCheck.getAttribute('data-item-name') || '').trim() || '選択した品目';
+                        if (requiredDialogLead) {
+                            requiredDialogLead.textContent = '「' + sourceName + '」には必須セット品目があるため、次の品目もあわせて選択します。';
+                        }
+                        requiredDialogList.innerHTML = '';
+                        result.toCheck.forEach(function (check) {
+                            const li = document.createElement('li');
+                            const code = (check.getAttribute('data-item-code') || '').trim() || check.value;
+                            const name = (check.getAttribute('data-item-name') || '').trim();
+                            li.textContent = name !== '' ? (code + ' / ' + name) : code;
+                            requiredDialogList.appendChild(li);
+                        });
+                        if (requiredDialogMissing) {
+                            if (result.missing.length > 0) {
+                                const labels = result.missing.map(function (row) {
+                                    if (row.code && row.name) {
+                                        return row.code + ' / ' + row.name;
+                                    }
+                                    return row.code || row.name || ('ID ' + row.id);
+                                });
+                                requiredDialogMissing.textContent = '一覧に表示されていない必須セット品目があります。フィルターやページを見直して選択してください: '
+                                    + labels.join('、');
+                                requiredDialogMissing.classList.remove('d-none');
+                            } else {
+                                requiredDialogMissing.textContent = '';
+                                requiredDialogMissing.classList.add('d-none');
+                            }
+                        }
+                        requiredDialog.showModal();
+                    }
+
+                    function applyRequiredSelections(sourceCheck) {
+                        if (suppressingRequiredLookup || !sourceCheck.checked) {
+                            return;
+                        }
+                        const result = collectRequiredSelections(sourceCheck);
+                        if (result.toCheck.length === 0 && result.missing.length === 0) {
+                            return;
+                        }
+                        if (result.toCheck.length > 0) {
+                            suppressingRequiredLookup = true;
+                            result.toCheck.forEach(function (check) {
+                                check.checked = true;
+                            });
+                            suppressingRequiredLookup = false;
+                            syncRowInputs();
+                        }
+                        if (result.toCheck.length > 0 || result.missing.length > 0) {
+                            showRequiredDialog(sourceCheck, result);
+                        }
+                    }
+
                     if (toggle) {
                         toggle.addEventListener('change', syncSpecial);
                     }
                     itemChecks.forEach(function (check) {
-                        check.addEventListener('change', syncRowInputs);
+                        check.addEventListener('change', function () {
+                            applyRequiredSelections(check);
+                            syncRowInputs();
+                        });
                     });
 
                     if (priceStepPanel) {
@@ -593,6 +703,18 @@
                         descriptionDialog.addEventListener('click', function (event) {
                             if (event.target === descriptionDialog) {
                                 descriptionDialog.close();
+                            }
+                        });
+                    }
+                    if (requiredDialogOk && requiredDialog) {
+                        requiredDialogOk.addEventListener('click', function () {
+                            requiredDialog.close();
+                        });
+                    }
+                    if (requiredDialog) {
+                        requiredDialog.addEventListener('click', function (event) {
+                            if (event.target === requiredDialog) {
+                                requiredDialog.close();
                             }
                         });
                     }

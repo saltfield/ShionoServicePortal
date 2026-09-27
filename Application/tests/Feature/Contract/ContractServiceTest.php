@@ -96,6 +96,23 @@ it('shows order-not-submitted warning on overview for draft contracts', function
         ->assertSee('このオーダーはまだ申請されていません');
 });
 
+it('exposes required item auto-select markup on order create', function () {
+    $fx = contractFixture();
+
+    $this->actingAs($fx['bpUser'], 'bp')
+        ->get(route('bp.contracts.create', [
+            'customer_id' => $fx['customer']->id,
+            'site_id' => $fx['site']->id,
+        ]))
+        ->assertOk()
+        ->assertSee('requiredItemDialog', false)
+        ->assertSee('data-required-item-id="'.$fx['initial']->id.'"', false)
+        ->assertSee('data-required-item-name="'.$fx['initial']->name.'"', false)
+        ->assertSee('必須セット品目を追加します')
+        ->assertSee('applyRequiredSelections', false)
+        ->assertSee('必須セットがある品目を選ぶと、セット先も自動で選択されます');
+});
+
 it('creates draft with required items and parent wholesale partition', function () {
     $fx = contractFixture();
     $service = app(ContractService::class);
