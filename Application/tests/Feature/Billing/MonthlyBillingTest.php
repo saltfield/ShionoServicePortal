@@ -365,9 +365,31 @@ it('generates invoices for a past month range scoped to bp tree, bp alone, or cu
     expect($treeStats['scope']['type'])->toBe('bp_tree')
         ->and($treeStats['months'])->toHaveCount(3)
         ->and($treeStats['invoices'])->toBe(3)
+        ->and($treeStats['kickbacks'])->toBe(0)
         ->and($treeStats['errors'])->toBe(0)
         ->and(Invoice::query()->where('contract_id', $fx['contract']->id)->count())->toBe(3)
-        ->and(Invoice::query()->where('contract_id', $otherContract->id)->count())->toBe(0);
+        ->and(Invoice::query()->where('contract_id', $otherContract->id)->count())->toBe(0)
+        ->and(KickbackInvoice::query()->count())->toBe(0);
+
+    // キックバック開始月（初回+6）を含む範囲でも、過去請求の範囲生成では KB を作らない
+    $throughKickbackStart = app(MonthlyBillingService::class)->runRange(
+        '202509',
+        '202512',
+        ['type' => 'bp', 'id' => $fx['leaf']->id],
+        $fx['admin'],
+    );
+    expect($throughKickbackStart['invoices'])->toBe(4)
+        ->and($throughKickbackStart['kickbacks'])->toBe(0)
+        ->and(KickbackInvoice::query()->count())->toBe(0);
+
+    // 通常の単月バッチなら 6ヶ月後にキックバックが生成される
+    $kbStats = app(MonthlyBillingService::class)->run(
+        '202512',
+        $fx['admin'],
+        scope: ['type' => 'bp', 'id' => $fx['leaf']->id],
+    );
+    expect($kbStats['kickbacks'])->toBe(2)
+        ->and(KickbackInvoice::query()->where('billing_year_month', '202506')->count())->toBe(2);
 
     $again = app(MonthlyBillingService::class)->runRange(
         '202508',
@@ -387,15 +409,15 @@ it('generates invoices for a past month range scoped to bp tree, bp alone, or cu
 
     $this->actingAs($fx['admin'], 'admin')
         ->post(route('admin.billing-batch.run-range'), [
-            'from_year_month' => '202509',
-            'to_year_month' => '202509',
+            'from_year_month' => '202601',
+            'to_year_month' => '202601',
             'scope_type' => 'customer',
             'customer_id' => $fx['customer']->id,
         ])
         ->assertRedirect()
         ->assertSessionHas('status');
 
-    expect(Invoice::query()->where('contract_id', $fx['contract']->id)->where('billing_year_month', '202509')->exists())->toBeTrue()
+    expect(Invoice::query()->where('contract_id', $fx['contract']->id)->where('billing_year_month', '202601')->exists())->toBeTrue()
         ->and(Invoice::query()->where('contract_id', $otherContract->id)->count())->toBe(0);
 });
 

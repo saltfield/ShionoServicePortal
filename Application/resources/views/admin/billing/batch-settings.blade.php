@@ -88,7 +88,8 @@
                 <div class="card-body">
                     <h2 class="h6 mb-2">過去月の請求を生成（範囲）</h2>
                     <p class="small text-muted mb-3">
-                        導入前から稼働していた契約向け。対象は <strong>BP（配下含む）</strong>・<strong>BP単体</strong>・<strong>カスタマー</strong>のいずれか。キックバックは請求の <strong>6ヶ月後</strong>に生成されます。
+                        導入前から稼働していた契約向け。対象は <strong>BP（配下含む）</strong>・<strong>BP単体</strong>・<strong>カスタマー</strong>のいずれか。
+                        <strong>カスタマー請求のみ</strong>生成します。キックバックは通常の単月バッチで、対象請求の <strong>6ヶ月後</strong>に生成されます。
                     </p>
                     <div class="row g-2 align-items-end">
                         <div class="col-md-3">

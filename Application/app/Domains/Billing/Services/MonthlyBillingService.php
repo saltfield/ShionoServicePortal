@@ -27,7 +27,7 @@ class MonthlyBillingService
     ) {}
 
     /**
-     * @param  array{type: 'bp'|'customer', id: int}|null  $scope
+     * @param  array{type: 'bp_tree'|'bp'|'customer', id: int}|null  $scope
      * @return array{billing_year_month: string, invoices: int, kickbacks: int, skipped: int, errors: int, run_id: int, status: string, scope: ?array}
      */
     public function run(
@@ -35,6 +35,7 @@ class MonthlyBillingService
         ?User $actor = null,
         ?BillingBatchRunTrigger $trigger = null,
         ?array $scope = null,
+        bool $withKickbacks = true,
     ): array {
         $ym = $billingYearMonth ?: $this->schedule->billingYearMonthFor(now());
         if (! preg_match('/^\d{6}$/', $ym)) {
@@ -78,6 +79,10 @@ class MonthlyBillingService
             } catch (Throwable $e) {
                 $stats['errors']++;
                 $this->recordError($run, $contract, $ym, 'customer_invoice', $e);
+            }
+
+            if (! $withKickbacks) {
+                continue;
             }
 
             try {
@@ -130,6 +135,7 @@ class MonthlyBillingService
 
     /**
      * 過去月など、複数請求月を古い順に連続実行する（導入時バックフィル用）。
+     * カスタマー請求のみ生成する（キックバックは通常の単月バッチで請求月の6ヶ月後に生成）。
      * BP（配下含む）・BP単体・カスタマーのいずれかを必ず指定する。
      *
      * @param  array{type: 'bp_tree'|'bp'|'customer', id: int}  $scope
@@ -160,7 +166,13 @@ class MonthlyBillingService
         ];
 
         foreach ($months as $ym) {
-            $stats = $this->run($ym, $actor, BillingBatchRunTrigger::Manual, $normalizedScope);
+            $stats = $this->run(
+                $ym,
+                $actor,
+                BillingBatchRunTrigger::Manual,
+                $normalizedScope,
+                withKickbacks: false,
+            );
             $aggregated['months'][] = $stats;
             $aggregated['invoices'] += $stats['invoices'];
             $aggregated['kickbacks'] += $stats['kickbacks'];

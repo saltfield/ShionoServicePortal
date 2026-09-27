@@ -157,10 +157,9 @@ class BillingBatchSettingsController extends Controller
 
         $monthSummaries = collect($stats['months'])
             ->map(fn (array $month) => sprintf(
-                '%s(請求%d/KB%d/skip%d/err%d)',
+                '%s(請求%d/skip%d/err%d)',
                 $month['billing_year_month'],
                 $month['invoices'],
-                $month['kickbacks'],
                 $month['skipped'],
                 $month['errors'],
             ))
@@ -173,12 +172,11 @@ class BillingBatchSettingsController extends Controller
         };
 
         return back()->with('status', sprintf(
-            '過去月の請求を生成しました（対象: %s / %s〜%s / 合計 請求 %d / キックバック %d / スキップ %d / エラー %d）。詳細: %s',
+            '過去月の請求を生成しました（対象: %s / %s〜%s / 合計 請求 %d / スキップ %d / エラー %d）。キックバックは含めません。詳細: %s',
             $scopeLabel,
             $stats['from'],
             $stats['to'],
             $stats['invoices'],
-            $stats['kickbacks'],
             $stats['skipped'],
             $stats['errors'],
             $monthSummaries,

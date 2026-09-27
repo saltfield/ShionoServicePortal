@@ -16,7 +16,7 @@ class RunMonthlyBillingCommand extends Command
                             {--bp= : 範囲生成の対象 BP コード（単体）}
                             {--customer= : 範囲生成の対象カスタマーコード}';
 
-    protected $description = '月次のカスタマー請求・キックバックを生成する（単月または BP/CN 限定の範囲）';
+    protected $description = '月次のカスタマー請求・キックバックを生成する（単月）または BP/CN 限定の過去請求のみ範囲生成';
 
     public function handle(MonthlyBillingService $monthly): int
     {
