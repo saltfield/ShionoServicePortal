@@ -87,7 +87,8 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sspsecret}
       TZ: Asia/Tokyo
     volumes:
-      - ssp-mariadb-data:/var/lib/mysql
+      # ホスト側に永続化（Develop/mariadb-data/）。.gitignore 済み
+      - ./mariadb-data:/var/lib/mysql
       - ./mariadb/my.cnf:/etc/mysql/conf.d/zz-custom.cnf:ro
       - ./mariadb/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -113,6 +114,3 @@ services:
 networks:
   ssp-net:
     driver: bridge
-
-volumes:
-  ssp-mariadb-data:

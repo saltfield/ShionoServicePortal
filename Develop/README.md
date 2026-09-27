@@ -56,12 +56,14 @@ docker compose up -d scheduler queue
 - `php/Dockerfile` … PHP 8.3-FPM、拡張、**Noto Sans CJK**（PDF用日本語フォント）
 - `nginx/conf.d/default.conf` … Laravel `public` 向け。`X-Forwarded-*` を考慮
 - `mariadb/my.cnf` … `utf8mb4` / `utf8mb4_uca1400_ai_ci`、TZ=+09:00
+- `mariadb-data/` … MariaDB データ（ホストディレクトリ。リポジトリ外・`.gitignore` 済み）
 - `scheduler` … 自動請求バッチ用。停止しているとスケジュール実行されない
 - `queue` … メール通知用。停止していると `jobs` に溜まるだけで送信されない
 
 ## 注意
 
-- DB ボリューム初回作成時のみ `mariadb/init/` が実行されます。
+- DB データは `Develop/mariadb-data/` に保存されます。ディレクトリは初回起動時に作成されます。
+- `mariadb-data/` が空のときだけ `mariadb/init/` と `MYSQL_*` によるユーザー作成が実行されます。
 - `storage/` の Permission denied が出た場合（root で artisan 実行後など）:
 
 ```bash

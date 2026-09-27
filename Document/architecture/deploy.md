@@ -20,6 +20,7 @@ Shiono Service Portal を Docker スタックで起動・更新するための�
 |------------|----------|
 | `Application/` | `/var/www/html`（php / scheduler / queue / nginx） |
 | `Develop/` | compose・Nginx・PHP・MariaDB 設定 |
+| `Develop/mariadb-data/` | MariaDB データ（`/var/lib/mysql`）。ホスト永続・gitignore 済み |
 
 TLS は本スタック外のリバースプロキシで終端する（平文 HTTP を 8080 で公開）。
 
@@ -297,6 +298,7 @@ php artisan queue:work --sleep=1 --tries=3 --timeout=90
 | 自動請求が動かない | `scheduler` 起動有無、設定の有効・日時、生成履歴 |
 | 予定時刻を過ぎても履歴なし | スケジューラ未起動が大半。起動後は当日取りこぼし回収あり |
 | メールが届かない | `queue` 起動有無、`jobs` / `failed_jobs`、MAIL_*、Mailpit（開発）、対象ユーザーの email |
+| `Access denied for user 'ssp'@...` | `Application/.env` の `DB_PASSWORD` と `Develop/.env` の `MYSQL_PASSWORD` を一致させる。既存データが別パスワードで初期化されている場合は `Develop/mariadb-data/` を退避・削除して再作成（空ディレクトリで `MYSQL_*` が再適用される） |
 | マイグレーション失敗 | DB 接続、既存テーブル差分、ログ |
 | 日本語 PDF 化け | コンテナに Noto CJK が入っているか（php イメージ標準） |
 | セッション切れ・URL 不正 | `APP_URL` とプロキシの `X-Forwarded-Proto` |
