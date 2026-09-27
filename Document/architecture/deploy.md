@@ -116,12 +116,15 @@ docker compose exec -u root php chown -R www-data:www-data \
 
 ### 4. アプリ初期化
 
+ホスト上の `Application/` は多くの環境で `www-data` から書けないため、**書き込みを伴う artisan は `-u root`** で実行します。
+
 ```bash
 cd Develop
-docker compose exec -u www-data php php artisan key:generate
-# Permission denied の場合は -u root で実行し、あとで .env を chown
 
-docker compose exec -u www-data php php artisan migrate --force
+# APP_KEY を Application/.env に書き込む（www-data では Permission denied になる）
+docker compose exec -u root php php artisan key:generate
+
+docker compose exec -u root php php artisan migrate --force
 
 # --- 本番初回シード（推奨）---
 # Application/.env に例:
@@ -141,7 +144,9 @@ docker compose exec -u root php php artisan db:seed \
 
 ```bash
 docker compose exec -u root php chown -R www-data:www-data \
-  /var/www/html/storage /var/www/html/bootstrap/cache
+  /var/www/html/storage \
+  /var/www/html/bootstrap/cache \
+  /var/www/html/.env
 docker compose exec -u www-data php php artisan config:cache
 docker compose exec -u www-data php php artisan route:cache
 docker compose exec -u www-data php php artisan view:cache
@@ -286,7 +291,7 @@ php artisan queue:work --sleep=1 --tries=3 --timeout=90
 | `vendor does not exist and could not be created` | `www-data` に書込権なし。`docker compose exec -u root php composer install ...` のあと `chown` |
 | `Class "Faker\Factory" not found`（db:seed） | 開発用フルシードは Faker 必須。本番は `ProductionBootstrapSeeder` を使う（`--no-dev` 可） |
 | `ADMIN_SEED_PASSWORD` 関連エラー | `Application/.env` に `ADMIN_SEED_PASSWORD`（10文字以上）を設定してから ProductionBootstrapSeeder を再実行 |
-| `file_put_contents(.../.env): Permission denied` | `key:generate` を `-u root` で実行するか、ホストで `.env` を書き込み可にする |
+| `file_put_contents(.../.env): Permission denied` | `key:generate` は必ず `-u root`。終了後 `chown www-data:www-data /var/www/html/.env` |
 | `The "APP_NAME" variable is not set`（Compose WARN） | `Develop/.env` に `APP_NAME=SSP` を追加（または同期メモの `${APP_NAME}` をリテラルに変更） |
 | Permission denied (storage) | `chown -R www-data:www-data storage bootstrap/cache` |
 | 自動請求が動かない | `scheduler` 起動有無、設定の有効・日時、生成履歴 |

@@ -41,8 +41,10 @@ docker compose exec -u root php composer install
 docker compose exec -u root php chown -R www-data:www-data \
   /var/www/html/vendor /var/www/html/storage /var/www/html/bootstrap/cache
 
-docker compose exec -u www-data php php artisan key:generate
-docker compose exec -u www-data php php artisan migrate --seed
+# .env への書き込みも root（www-data では Permission denied）
+docker compose exec -u root php php artisan key:generate
+docker compose exec -u root php php artisan migrate --seed
+docker compose exec -u root php chown www-data:www-data /var/www/html/.env
 
 docker compose up -d scheduler queue
 ```
