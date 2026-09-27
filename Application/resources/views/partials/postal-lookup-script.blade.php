@@ -25,12 +25,15 @@ document.addEventListener('DOMContentLoaded', () => {
         input.value = String(input.value || '').replace(/[^0-9-]/g, '').slice(0, 20);
     };
 
-    const lookupAddress = async (postalInput) => {
+    const lookupAddress = async (postalInput, { notifyIncomplete = false } = {}) => {
         const addressId = postalInput.dataset.addressTarget;
         const addressInput = addressId ? document.getElementById(addressId) : null;
         const zip = String(postalInput.value || '').replace(/\D/g, '');
 
         if (zip.length !== 7) {
+            if (notifyIncomplete) {
+                alert('郵便番号は7桁で入力してください。');
+            }
             return;
         }
 
@@ -62,9 +65,6 @@ document.addEventListener('DOMContentLoaded', () => {
         input.addEventListener('input', restrictPostal);
         input.addEventListener('blur', () => {
             input.value = formatPostal(input.value);
-            if (String(input.value).replace(/\D/g, '').length === 7) {
-                lookupAddress(input);
-            }
         });
     });
 
@@ -76,7 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
         button.addEventListener('click', () => {
             const input = document.getElementById(button.dataset.postalInput);
             if (input) {
-                lookupAddress(input);
+                lookupAddress(input, { notifyIncomplete: true });
             }
         });
     });
