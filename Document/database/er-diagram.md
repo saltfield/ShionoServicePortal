@@ -210,6 +210,17 @@ UNIQUE(item_id, bp_id, customer_id)
 #### `data_field_names`
 契約データの名称マスタ（管理者管理）。`replace_code`（英小文字＋`_`、一意。予約語不可）。
 
+#### `entity_notes`
+契約・BP・カスタマーの備考（上書き編集・履歴なし）。旧 `contract_notes` をポリモーフィック化。
+
+| カラム | 型 | 備考 |
+|--------|-----|------|
+| subject_type / subject_id | | `contract` / `bp` / `customer` + 対象 ID |
+| visibility | VARCHAR | `shared`（対象閲覧者全員） / `organization`（投稿組織のみ） |
+| owner_type / owner_id | | 組織内備考の所有者。`admin`+0 / `bp`+bp_id / `customer`+customer_id。共有は `_`+0 |
+| body | LONGTEXT | 最大約10万文字 |
+| updated_by_user_id | FK NULL | 最終更新者 |
+
 #### `contract_item_data`
 契約明細ごとの **名称:値**。`data_field_name_id` 任意（マスタ参照）。名称はマスタ外の直接入力も可。マスタ外は `replace_code` 必須。品目あたり最大10行。  
 `value` はアプリ層で暗号化保存（Laravel `encrypted` キャスト / `APP_KEY`）。画面・Eloquent 経由は平文。**値での SQL 検索は不可**（データ名などは可）。

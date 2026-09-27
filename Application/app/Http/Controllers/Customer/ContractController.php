@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Customer;
 
 use App\Domains\Contract\Services\ContractService;
 use App\Domains\Iam\Services\RbacService;
+use App\Domains\Support\Services\EntityNoteService;
 use App\Http\Controllers\Concerns\DownloadsContractItemDocuments;
+use App\Http\Controllers\Concerns\ManagesEntityNotes;
 use App\Http\Controllers\Concerns\ResolvesContractShowTab;
 use App\Http\Controllers\Controller;
 use App\Models\Contract;
@@ -20,6 +22,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class ContractController extends Controller
 {
     use DownloadsContractItemDocuments;
+    use ManagesEntityNotes;
     use ResolvesContractShowTab;
 
     public function index(Request $request, RbacService $rbac, ContractService $service): View
@@ -46,7 +49,7 @@ class ContractController extends Controller
         ]);
     }
 
-    public function show(Request $request, Contract $contract, RbacService $rbac, ContractService $service): View
+    public function show(Request $request, Contract $contract, RbacService $rbac, ContractService $service, EntityNoteService $notes): View
     {
         $actor = $request->user('customer');
         abort_unless($rbac->hasPermission($actor, 'contract.view'), 403);
@@ -66,6 +69,9 @@ class ContractController extends Controller
             'routePrefix' => 'customer',
             'activeTab' => $this->resolveContractShowTab($request, true),
             'canPostMessages' => $service->canPostMessages($contract),
+            'sharedNote' => $notes->sharedNote($contract),
+            'organizationNote' => $notes->organizationNote($contract, $actor),
+            'canEditNotes' => true,
             'cancellationSuggestion' => null,
             'deleteConfirmationCode' => null,
             'documentDeleteCodes' => [],
@@ -92,6 +98,24 @@ class ContractController extends Controller
         return redirect()
             ->route('customer.contracts.show', ['contract' => $contract, 'tab' => 'messages'])
             ->with('status', 'メッセージを投稿しました。');
+    }
+
+    public function upsertSharedNote(Request $request, Contract $contract, RbacService $rbac, EntityNoteService $notes): RedirectResponse
+    {
+        $actor = $request->user('customer');
+        abort_unless($rbac->hasPermission($actor, 'contract.view'), 403);
+        abort_unless((int) $contract->customer_id === (int) $actor->customer_id, 403);
+
+        return $this->upsertSharedContractNote($request, $contract, $actor, 'customer', $notes);
+    }
+
+    public function upsertOrganizationNote(Request $request, Contract $contract, RbacService $rbac, EntityNoteService $notes): RedirectResponse
+    {
+        $actor = $request->user('customer');
+        abort_unless($rbac->hasPermission($actor, 'contract.view'), 403);
+        abort_unless((int) $contract->customer_id === (int) $actor->customer_id, 403);
+
+        return $this->upsertOrganizationContractNote($request, $contract, $actor, 'customer', $notes);
     }
 
     public function downloadDocument(Request $request, ContractItem $contractItem, int $document): StreamedResponse

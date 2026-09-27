@@ -70,9 +70,9 @@ trait ResolvesContractShowTab
      */
     protected function contractShowTabs(bool $isCustomerPortal): array
     {
-        $tabs = ['overview', 'items', 'billing', 'data', 'messages', 'history'];
+        $tabs = ['overview', 'items', 'billing', 'data', 'messages', 'notes', 'history'];
         if ($isCustomerPortal) {
-            return ['overview', 'items', 'data', 'messages', 'history'];
+            return ['overview', 'items', 'data', 'messages', 'notes', 'history'];
         }
 
         return $tabs;

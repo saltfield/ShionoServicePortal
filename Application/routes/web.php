@@ -124,6 +124,8 @@ foreach (
                     Route::get('contracts', [CustomerContractController::class, 'index'])->name('contracts.index');
                     Route::get('contracts/{contract}', [CustomerContractController::class, 'show'])->name('contracts.show');
                     Route::post('contracts/{contract}/messages', [CustomerContractController::class, 'storeMessage'])->name('contracts.messages.store');
+                    Route::put('contracts/{contract}/notes/shared', [CustomerContractController::class, 'upsertSharedNote'])->name('contracts.notes.shared');
+                    Route::put('contracts/{contract}/notes/organization', [CustomerContractController::class, 'upsertOrganizationNote'])->name('contracts.notes.organization');
                     Route::get('contract-items/{contractItem}/documents/{document}/download', [CustomerContractController::class, 'downloadDocument'])->name('contracts.items.documents.download');
 
                     Route::get('tickets/received', [CustomerInquiryController::class, 'received'])->name('tickets.received');
@@ -181,6 +183,8 @@ foreach (
                     Route::get('business-partners/create', [BusinessPartnerController::class, 'create'])->name('business-partners.create');
                     Route::post('business-partners', [BusinessPartnerController::class, 'store'])->name('business-partners.store');
                     Route::get('business-partners/{businessPartner}', [BusinessPartnerController::class, 'show'])->name('business-partners.show');
+                    Route::put('business-partners/{businessPartner}/notes/shared', [BusinessPartnerController::class, 'upsertSharedNote'])->name('business-partners.notes.shared');
+                    Route::put('business-partners/{businessPartner}/notes/organization', [BusinessPartnerController::class, 'upsertOrganizationNote'])->name('business-partners.notes.organization');
                     Route::get('business-partners/{businessPartner}/edit', [BusinessPartnerController::class, 'edit'])->name('business-partners.edit');
                     Route::put('business-partners/{businessPartner}', [BusinessPartnerController::class, 'update'])->name('business-partners.update');
                     Route::put('business-partners/{businessPartner}/move', [BusinessPartnerController::class, 'move'])->name('business-partners.move');
@@ -190,6 +194,8 @@ foreach (
                     Route::get('customers/create', [CustomerController::class, 'create'])->name('customers.create');
                     Route::post('customers', [CustomerController::class, 'store'])->name('customers.store');
                     Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show');
+                    Route::put('customers/{customer}/notes/shared', [CustomerController::class, 'upsertSharedNote'])->name('customers.notes.shared');
+                    Route::put('customers/{customer}/notes/organization', [CustomerController::class, 'upsertOrganizationNote'])->name('customers.notes.organization');
                     Route::get('customers/{customer}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
                     Route::put('customers/{customer}', [CustomerController::class, 'update'])->name('customers.update');
                     Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->name('customers.destroy');
@@ -238,6 +244,8 @@ foreach (
                     Route::post('contracts/{contract}/cancel', [ContractController::class, 'cancel'])->name('contracts.cancel');
                     Route::get('contracts/{contract}/cancellation-suggestion', [ContractController::class, 'cancellationSuggestion'])->name('contracts.cancellation-suggestion');
                     Route::post('contracts/{contract}/messages', [ContractController::class, 'storeMessage'])->name('contracts.messages.store');
+                    Route::put('contracts/{contract}/notes/shared', [ContractController::class, 'upsertSharedNote'])->name('contracts.notes.shared');
+                    Route::put('contracts/{contract}/notes/organization', [ContractController::class, 'upsertOrganizationNote'])->name('contracts.notes.organization');
                     Route::post('contracts/{contract}/regenerate-documents', [ContractController::class, 'regenerateDocuments'])->name('contracts.regenerate-documents');
                     Route::put('contracts/{contract}/data', [ContractController::class, 'upsertContractData'])->name('contracts.data');
                     Route::put('contract-items/{contractItem}/data', [ContractController::class, 'upsertData'])->name('contracts.items.data');
@@ -304,6 +312,8 @@ foreach (
                     Route::get('business-partners/create', [BpBusinessPartnerController::class, 'create'])->name('business-partners.create');
                     Route::post('business-partners', [BpBusinessPartnerController::class, 'store'])->name('business-partners.store');
                     Route::get('business-partners/{businessPartner}', [BpBusinessPartnerController::class, 'show'])->name('business-partners.show');
+                    Route::put('business-partners/{businessPartner}/notes/shared', [BpBusinessPartnerController::class, 'upsertSharedNote'])->name('business-partners.notes.shared');
+                    Route::put('business-partners/{businessPartner}/notes/organization', [BpBusinessPartnerController::class, 'upsertOrganizationNote'])->name('business-partners.notes.organization');
                     Route::get('business-partners/{businessPartner}/edit', [BpBusinessPartnerController::class, 'edit'])->name('business-partners.edit');
                     Route::put('business-partners/{businessPartner}', [BpBusinessPartnerController::class, 'update'])->name('business-partners.update');
                     Route::put('business-partners/{businessPartner}/move', [BpBusinessPartnerController::class, 'move'])->name('business-partners.move');
@@ -313,6 +323,8 @@ foreach (
                     Route::get('customers/create', [BpCustomerController::class, 'create'])->name('customers.create');
                     Route::post('customers', [BpCustomerController::class, 'store'])->name('customers.store');
                     Route::get('customers/{customer}', [BpCustomerController::class, 'show'])->name('customers.show');
+                    Route::put('customers/{customer}/notes/shared', [BpCustomerController::class, 'upsertSharedNote'])->name('customers.notes.shared');
+                    Route::put('customers/{customer}/notes/organization', [BpCustomerController::class, 'upsertOrganizationNote'])->name('customers.notes.organization');
                     Route::get('customers/{customer}/edit', [BpCustomerController::class, 'edit'])->name('customers.edit');
                     Route::put('customers/{customer}', [BpCustomerController::class, 'update'])->name('customers.update');
                     Route::delete('customers/{customer}', [BpCustomerController::class, 'destroy'])->name('customers.destroy');
@@ -357,6 +369,8 @@ foreach (
                     Route::post('contracts/{contract}/cancel', [BpContractController::class, 'cancel'])->name('contracts.cancel');
                     Route::get('contracts/{contract}/cancellation-suggestion', [BpContractController::class, 'cancellationSuggestion'])->name('contracts.cancellation-suggestion');
                     Route::post('contracts/{contract}/messages', [BpContractController::class, 'storeMessage'])->name('contracts.messages.store');
+                    Route::put('contracts/{contract}/notes/shared', [BpContractController::class, 'upsertSharedNote'])->name('contracts.notes.shared');
+                    Route::put('contracts/{contract}/notes/organization', [BpContractController::class, 'upsertOrganizationNote'])->name('contracts.notes.organization');
                     Route::post('contracts/{contract}/regenerate-documents', [BpContractController::class, 'regenerateDocuments'])->name('contracts.regenerate-documents');
                     Route::put('contracts/{contract}/data', [BpContractController::class, 'upsertContractData'])->name('contracts.data');
                     Route::put('contract-items/{contractItem}/data', [BpContractController::class, 'upsertData'])->name('contracts.items.data');

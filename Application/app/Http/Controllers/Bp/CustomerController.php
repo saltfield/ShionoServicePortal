@@ -9,7 +9,9 @@ use App\Domains\Auth\Support\IdentifierNormalizer;
 use App\Domains\Bp\Services\OrganizationMasterService;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\RbacService;
+use App\Domains\Support\Services\EntityNoteService;
 use App\Http\Controllers\Concerns\ConfirmsCustomerDeletion;
+use App\Http\Controllers\Concerns\ManagesEntityNotes;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
 use App\Models\Customer;
@@ -24,6 +26,7 @@ use InvalidArgumentException;
 class CustomerController extends Controller
 {
     use ConfirmsCustomerDeletion;
+    use ManagesEntityNotes;
 
     public function index(Request $request, AuthorizationService $authorization, BpHierarchyService $hierarchy): View
     {
@@ -95,7 +98,7 @@ class CustomerController extends Controller
             ->with('status', "{$customer->code} を作成しました。");
     }
 
-    public function show(Request $request, Customer $customer, OrganizationMasterService $service, AuthorizationService $authorization, RbacService $rbac): View
+    public function show(Request $request, Customer $customer, OrganizationMasterService $service, AuthorizationService $authorization, RbacService $rbac, EntityNoteService $notes): View
     {
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'customer.view');
@@ -128,7 +131,42 @@ class CustomerController extends Controller
             'customerContracts' => $customerContracts,
             'customerInvoices' => $customerInvoices,
             'activeTab' => $this->resolveCustomerShowTab($request, $canManageUsers, $canViewContracts, $canViewInvoices),
+            'sharedNote' => $notes->sharedNote($customer),
+            'organizationNote' => $notes->organizationNote($customer, $actor),
+            'canEditNotes' => true,
         ]);
+    }
+
+    public function upsertSharedNote(Request $request, Customer $customer, OrganizationMasterService $service, AuthorizationService $authorization, EntityNoteService $notes): RedirectResponse
+    {
+        $actor = $request->user('bp');
+        $authorization->authorize($actor, 'customer.view');
+        $service->ensureCustomerInScope($actor, $customer);
+
+        return $this->upsertSharedEntityNote(
+            $request,
+            $customer,
+            $actor,
+            $notes,
+            'bp.customers.show',
+            ['customer' => $customer],
+        );
+    }
+
+    public function upsertOrganizationNote(Request $request, Customer $customer, OrganizationMasterService $service, AuthorizationService $authorization, EntityNoteService $notes): RedirectResponse
+    {
+        $actor = $request->user('bp');
+        $authorization->authorize($actor, 'customer.view');
+        $service->ensureCustomerInScope($actor, $customer);
+
+        return $this->upsertOrganizationEntityNote(
+            $request,
+            $customer,
+            $actor,
+            $notes,
+            'bp.customers.show',
+            ['customer' => $customer],
+        );
     }
 
     public function edit(Request $request, Customer $customer, OrganizationMasterService $service, AuthorizationService $authorization): View
@@ -177,7 +215,7 @@ class CustomerController extends Controller
         bool $canViewInvoices = false,
     ): string {
         $tab = (string) $request->input('tab', 'overview');
-        $allowed = ['overview', 'sites', 'prices'];
+        $allowed = ['overview', 'sites', 'prices', 'notes'];
         if ($canManageUsers) {
             $allowed[] = 'users';
         }

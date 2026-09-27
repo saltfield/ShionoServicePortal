@@ -8,8 +8,10 @@ use App\Domains\Billing\Services\BpCustomerBillingOverviewService;
 use App\Domains\Bp\Services\OrganizationMasterService;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\RbacService;
+use App\Domains\Support\Services\EntityNoteService;
 use App\Http\Controllers\Concerns\ConfirmsBusinessPartnerDeletion;
 use App\Http\Controllers\Concerns\ConfirmsBusinessPartnerMove;
+use App\Http\Controllers\Concerns\ManagesEntityNotes;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessPartner;
 use App\Models\Contract;
@@ -27,6 +29,7 @@ class BusinessPartnerController extends Controller
 {
     use ConfirmsBusinessPartnerDeletion;
     use ConfirmsBusinessPartnerMove;
+    use ManagesEntityNotes;
 
     public function index(Request $request, AuthorizationService $authorization, BpHierarchyService $hierarchy): View
     {
@@ -112,7 +115,7 @@ class BusinessPartnerController extends Controller
             ->with('status', "{$partner->code} を作成しました。");
     }
 
-    public function show(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization, BpHierarchyService $hierarchy, RbacService $rbac, BpCustomerBillingOverviewService $billingOverview): View
+    public function show(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization, BpHierarchyService $hierarchy, RbacService $rbac, BpCustomerBillingOverviewService $billingOverview, EntityNoteService $notes): View
     {
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'bp.view');
@@ -131,6 +134,7 @@ class BusinessPartnerController extends Controller
             'customers' => $canViewCustomers ? 'customers' : 'overview',
             'contracts' => $canViewContracts ? 'contracts' : 'overview',
             'billing' => $canViewBilling ? 'billing' : 'overview',
+            'notes' => 'notes',
             default => 'overview',
         };
 
@@ -174,7 +178,42 @@ class BusinessPartnerController extends Controller
             'bpContracts' => $bpContracts,
             'billing' => $billing,
             'activeTab' => $activeTab,
+            'sharedNote' => $notes->sharedNote($businessPartner),
+            'organizationNote' => $notes->organizationNote($businessPartner, $actor),
+            'canEditNotes' => true,
         ]);
+    }
+
+    public function upsertSharedNote(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization, EntityNoteService $notes): RedirectResponse
+    {
+        $actor = $request->user('bp');
+        $authorization->authorize($actor, 'bp.view');
+        $service->ensureBpInScope($actor, $businessPartner);
+
+        return $this->upsertSharedEntityNote(
+            $request,
+            $businessPartner,
+            $actor,
+            $notes,
+            'bp.business-partners.show',
+            ['businessPartner' => $businessPartner],
+        );
+    }
+
+    public function upsertOrganizationNote(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization, EntityNoteService $notes): RedirectResponse
+    {
+        $actor = $request->user('bp');
+        $authorization->authorize($actor, 'bp.view');
+        $service->ensureBpInScope($actor, $businessPartner);
+
+        return $this->upsertOrganizationEntityNote(
+            $request,
+            $businessPartner,
+            $actor,
+            $notes,
+            'bp.business-partners.show',
+            ['businessPartner' => $businessPartner],
+        );
     }
 
     public function edit(Request $request, BusinessPartner $businessPartner, OrganizationMasterService $service, AuthorizationService $authorization): View

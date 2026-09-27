@@ -1575,6 +1575,11 @@ class ContractService
         }
     }
 
+    public function assertActorCanAccessContract(User $actor, Contract $contract): void
+    {
+        $this->ensureContractScope($actor, $contract);
+    }
+
     private function transition(Contract $contract, ContractStatus $to, User $actor, ?string $note): void
     {
         $from = $contract->status;

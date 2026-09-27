@@ -36,6 +36,7 @@
         if ($canViewTickets) {
             $allowedTabs[] = 'tickets';
         }
+        $allowedTabs[] = 'notes';
         $activeTab = $activeTab ?? 'overview';
         if (! in_array($activeTab, $allowedTabs, true)) {
             $activeTab = 'overview';
@@ -48,6 +49,7 @@
             'users' => 'ユーザー管理',
             'billing' => '請求',
             'tickets' => 'チケット',
+            'notes' => '備考',
         ];
     @endphp
     @include('partials.breadcrumb', [
@@ -278,6 +280,14 @@
         @include('admin.tickets._org_list', [
             'tickets' => $bpTickets,
             'inspectBack' => ['return_bp_id' => $partner->id],
+        ])
+    @endif
+
+    @if ($activeTab === 'notes')
+        @include('partials.notes-tab', [
+            'notesSubjectLabel' => 'BP',
+            'sharedNoteRoute' => route($prefix.'.business-partners.notes.shared', $partner),
+            'organizationNoteRoute' => route($prefix.'.business-partners.notes.organization', $partner),
         ])
     @endif
 

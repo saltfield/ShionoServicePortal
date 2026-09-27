@@ -19,6 +19,7 @@
             'billing' => '請求設定',
             'data' => 'データ',
             'messages' => 'メッセージ',
+            'notes' => '備考',
             'history' => '履歴',
         ];
         if ($isCustomer) {
@@ -783,6 +784,14 @@
         <div style="max-width:40rem">
             <livewire:contract-chat :contract-id="$contract->id" :route-prefix="$prefix" :key="'contract-chat-'.$contract->id" />
         </div>
+    @endif
+
+    @if ($activeTab === 'notes')
+        @include('partials.notes-tab', [
+            'notesSubjectLabel' => '契約',
+            'sharedNoteRoute' => route($prefix.'.contracts.notes.shared', $contract),
+            'organizationNoteRoute' => route($prefix.'.contracts.notes.organization', $contract),
+        ])
     @endif
 
     @if ($activeTab === 'history')

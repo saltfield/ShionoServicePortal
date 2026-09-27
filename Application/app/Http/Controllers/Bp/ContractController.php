@@ -12,10 +12,12 @@ use App\Domains\Contract\Enums\ContractStatus;
 use App\Domains\Contract\Services\ContractService;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Domains\Iam\Services\RbacService;
+use App\Domains\Support\Services\EntityNoteService;
 use App\Http\Controllers\Concerns\ConfirmsContractDeletion;
 use App\Http\Controllers\Concerns\ConfirmsContractItemDocumentDeletion;
 use App\Http\Controllers\Concerns\DownloadsContractItemDocuments;
 use App\Http\Controllers\Concerns\FiltersContractsIndex;
+use App\Http\Controllers\Concerns\ManagesEntityNotes;
 use App\Http\Controllers\Concerns\OrdersContractIndexQuery;
 use App\Http\Controllers\Concerns\ResolvesContractShowTab;
 use App\Http\Controllers\Controller;
@@ -42,6 +44,7 @@ class ContractController extends Controller
     use ConfirmsContractItemDocumentDeletion;
     use DownloadsContractItemDocuments;
     use FiltersContractsIndex;
+    use ManagesEntityNotes;
     use OrdersContractIndexQuery;
     use ResolvesContractShowTab;
 
@@ -248,7 +251,7 @@ class ContractController extends Controller
             ->with('status', $statusMessage);
     }
 
-    public function show(Request $request, Contract $contract, AuthorizationService $authorization, ContractService $service, RbacService $rbac): View
+    public function show(Request $request, Contract $contract, AuthorizationService $authorization, ContractService $service, EntityNoteService $notes, RbacService $rbac): View
     {
         $actor = $request->user('bp');
         $authorization->authorize($actor, 'contract.view', [
@@ -278,6 +281,9 @@ class ContractController extends Controller
             'activeTab' => $this->resolveContractShowTab($request),
             'canPostMessages' => $service->canPostMessages($contract),
             'canManageBilling' => $rbac->hasPermission($actor, 'invoice.manage'),
+            'sharedNote' => $notes->sharedNote($contract),
+            'organizationNote' => $notes->organizationNote($contract, $actor),
+            'canEditNotes' => true,
             'cancellationSuggestion' => $this->defaultCancellationSuggestion($contract, $service),
             'deleteConfirmationCode' => $contract->status->value === 'draft'
                 ? $this->issueContractDeleteConfirmationCode($contract)
@@ -486,6 +492,28 @@ class ContractController extends Controller
         return redirect()
             ->route('bp.contracts.show', $this->contractShowRouteParams($request, $contract, ['tab' => 'messages']))
             ->with('status', 'メッセージを投稿しました。');
+    }
+
+    public function upsertSharedNote(Request $request, Contract $contract, AuthorizationService $authorization, EntityNoteService $notes): RedirectResponse
+    {
+        $actor = $request->user('bp');
+        $authorization->authorize($actor, 'contract.view', [
+            'resource_type' => 'contract',
+            'owner_bp_id' => $contract->owning_bp_id,
+        ]);
+
+        return $this->upsertSharedContractNote($request, $contract, $actor, 'bp', $notes);
+    }
+
+    public function upsertOrganizationNote(Request $request, Contract $contract, AuthorizationService $authorization, EntityNoteService $notes): RedirectResponse
+    {
+        $actor = $request->user('bp');
+        $authorization->authorize($actor, 'contract.view', [
+            'resource_type' => 'contract',
+            'owner_bp_id' => $contract->owning_bp_id,
+        ]);
+
+        return $this->upsertOrganizationContractNote($request, $contract, $actor, 'bp', $notes);
     }
 
     public function regenerateDocuments(Request $request, Contract $contract, ContractService $service): RedirectResponse
