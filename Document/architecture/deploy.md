@@ -51,12 +51,14 @@ cp .env.example .env
 | `MYSQL_DATABASE` | DB 名（例: `ssp`） |
 | `MYSQL_USER` / `MYSQL_PASSWORD` | アプリ用 DB ユーザー |
 | `DB_*`（同期メモ） | `Application/.env` の `DB_*` と一致させる |
+| `APP_NAME`（任意） | Compose が `${APP_NAME}` を展開する場合の WARN 回避用。例: `SSP`（アプリ本体は `Application/.env` の `APP_NAME`） |
 | `TZ` | `Asia/Tokyo` |
 
 #### `Application/.env` の要点
 
 | キー | 例 / 注意 |
 |------|-----------|
+| `APP_NAME` | 例: `SSP`（メール差出人名など） |
 | `APP_ENV` | 本番は `production` |
 | `APP_DEBUG` | 本番は `false` |
 | `APP_KEY` | 下記 `key:generate` で生成 |
@@ -76,16 +78,42 @@ cd Develop
 docker compose up -d --build
 ```
 
-`scheduler` / `queue` が含まれていることを確認:
+期待するコンテナ:
 
 ```bash
 docker compose ps
 # ssp-nginx / ssp-php / ssp-scheduler / ssp-queue / ssp-mariadb / ssp-mailpit
 ```
 
-### 3. アプリ初期化
+> **注意:** 初回はまだ `vendor` が無いため、`ssp-scheduler` / `ssp-queue` が `Restarting` になることがあります。次の手順 3 で解消します。
+
+### 3. Composer 依存関係（必須）
+
+リポジトリに `vendor/` は含めない想定です。**コンテナ起動後に必ず**インストールします。
+
+ホスト側の `Application/` は多くの環境で `www-data` から書き込めないため、**root で実行**します。
 
 ```bash
+cd Develop
+
+# 本番寄り
+docker compose exec -u root php composer install --no-dev --optimize-autoloader
+
+# 開発（dev 依存も入れる場合）
+# docker compose exec -u root php composer install
+
+docker compose exec -u root php chown -R www-data:www-data \
+  /var/www/html/vendor \
+  /var/www/html/storage \
+  /var/www/html/bootstrap/cache
+```
+
+`www-data` で `vendor does not exist and could not be created` と出たら、上記のとおり `-u root` を使ってください。
+
+### 4. アプリ初期化
+
+```bash
+cd Develop
 docker compose exec -u www-data php php artisan key:generate
 docker compose exec -u www-data php php artisan migrate --force
 docker compose exec -u www-data php php artisan db:seed --force   # 初回のみ（IAM 等）
@@ -101,7 +129,15 @@ docker compose exec -u www-data php php artisan route:cache
 docker compose exec -u www-data php php artisan view:cache
 ```
 
-### 4. フロントエンド資産（変更時）
+Composer 後に scheduler / queue を起こす:
+
+```bash
+docker compose up -d scheduler queue
+docker compose ps
+# ssp-scheduler / ssp-queue が Up（Restarting ではない）であること
+```
+
+### 5. フロントエンド資産（変更時）
 
 ホストまたは Node コンテナで Vite ビルド:
 
@@ -112,13 +148,14 @@ docker run --rm -v "$PWD/../Application:/app" -w /app node:22-bookworm \
 
 （`Develop` ディレクトリから実行する例）
 
-### 5. 疎通確認
+### 6. 疎通確認
 
 | 確認 | 方法 |
 |------|------|
 | Web | `http://<host>:8080/admin/login` 等 |
 | DB | `docker compose exec mariadb mariadb -u ssp -p ssp -e 'SELECT 1'` |
 | スケジューラ | `docker compose logs -f scheduler` に毎分 `Running scheduled tasks` |
+| キュー | `docker compose logs --tail=30 queue` に致命的エラーが無い |
 | 自動請求設定 | 管理者 → 自動請求設定 → 「次回の自動実行予定」が表示される |
 
 ## 更新デプロイ（コード反映）
@@ -129,11 +166,17 @@ git pull   # または成果物の配置
 
 docker compose up -d --build
 
+# composer.lock が変わった／vendor が無い場合
+docker compose exec -u root php composer install --no-dev --optimize-autoloader
+docker compose exec -u root php chown -R www-data:www-data \
+  /var/www/html/vendor /var/www/html/storage /var/www/html/bootstrap/cache
+
 docker compose exec -u www-data php php artisan migrate --force
 docker compose exec -u www-data php php artisan config:cache
 docker compose exec -u www-data php php artisan route:cache
 docker compose exec -u www-data php php artisan view:cache
 docker compose exec -u www-data php php artisan queue:restart   # queue ワーカー利用時
+docker compose up -d scheduler queue
 ```
 
 フロント変更がある場合は上記 Vite ビルドを再実行。
@@ -221,10 +264,13 @@ php artisan queue:work --sleep=1 --tries=3 --timeout=90
 | 症状 | 確認 |
 |------|------|
 | 502 / 空応答 | `docker compose ps`、`php` / `nginx` ログ |
+| `scheduler` / `queue` が Restarting | ログに `vendor/autoload.php` → **手順 3 の Composer 未実施**。実施後 `docker compose up -d scheduler queue` |
+| `vendor does not exist and could not be created` | `www-data` に書込権なし。`docker compose exec -u root php composer install ...` のあと `chown` |
+| `The "APP_NAME" variable is not set`（Compose WARN） | `Develop/.env` に `APP_NAME=SSP` を追加（または同期メモの `${APP_NAME}` をリテラルに変更） |
 | Permission denied (storage) | `chown -R www-data:www-data storage bootstrap/cache` |
 | 自動請求が動かない | `scheduler` 起動有無、設定の有効・日時、生成履歴 |
 | 予定時刻を過ぎても履歴なし | スケジューラ未起動が大半。起動後は当日取りこぼし回収あり |
-| メールが届かない | `queue` 起動有無、`jobs` / `failed_jobs`、MAIL_*、Mailpit（開発） |
+| メールが届かない | `queue` 起動有無、`jobs` / `failed_jobs`、MAIL_*、Mailpit（開発）、対象ユーザーの email |
 | マイグレーション失敗 | DB 接続、既存テーブル差分、ログ |
 | 日本語 PDF 化け | コンテナに Noto CJK が入っているか（php イメージ標準） |
 | セッション切れ・URL 不正 | `APP_URL` とプロキシの `X-Forwarded-Proto` |

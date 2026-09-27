@@ -11,6 +11,12 @@ SSL / リバースプロキシは本ディレクトリでは扱いません。�
 ```bash
 cd Develop
 cp .env.example .env   # 必要に応じてパスワードを変更
+# APP_NAME=SSP を入れておくと Compose の WARN を避けられる
+
+cd ../Application
+cp .env.example .env   # APP_URL / DB_* / MAIL_* を設定
+
+cd ../Develop
 docker compose up -d --build
 ```
 
@@ -25,10 +31,23 @@ docker compose up -d --build
 
 ## 初回アプリセットアップ
 
+`vendor` はリポジトリに含まれません。コンテナ起動後に Composer が必須です。
+
 ```bash
+cd Develop
+
+# ホストの Application に www-data が書けないことが多いため root で入れる
+docker compose exec -u root php composer install
+docker compose exec -u root php chown -R www-data:www-data \
+  /var/www/html/vendor /var/www/html/storage /var/www/html/bootstrap/cache
+
 docker compose exec -u www-data php php artisan key:generate
 docker compose exec -u www-data php php artisan migrate --seed
+
+docker compose up -d scheduler queue
 ```
+
+`scheduler` / `queue` が `Restarting` のときは、ほぼ `vendor/autoload.php` 不足です。上記 Composer 後に再起動してください。
 
 ## 構成
 
