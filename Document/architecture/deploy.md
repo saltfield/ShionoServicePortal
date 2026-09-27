@@ -161,16 +161,28 @@ docker compose ps
 # ssp-scheduler / ssp-queue が Up（Restarting ではない）であること
 ```
 
-### 5. フロントエンド資産（変更時）
+### 5. フロントエンド資産（必須）
 
-ホストまたは Node コンテナで Vite ビルド:
+`public/build/`（`manifest.json`）は **リポジトリに含まれません**。未ビルドだと画面が `Vite manifest not found` で落ちます。  
+PHP コンテナに Node は無いので、**ホストの Node** または **一時 Node コンテナ**でビルドします。
 
 ```bash
+cd Develop
+
+# Node コンテナ例（ホストに Node が無くても可）
 docker run --rm -v "$PWD/../Application:/app" -w /app node:22-bookworm \
   bash -lc "npm ci && npm run build"
+
+# 成功確認
+test -f ../Application/public/build/manifest.json && echo OK
 ```
 
-（`Develop` ディレクトリから実行する例）
+ホストに Node 22 がある場合:
+
+```bash
+cd ../Application
+npm ci && npm run build
+```
 
 ### 6. 疎通確認
 
@@ -201,9 +213,11 @@ docker compose exec -u www-data php php artisan route:cache
 docker compose exec -u www-data php php artisan view:cache
 docker compose exec -u www-data php php artisan queue:restart   # queue ワーカー利用時
 docker compose up -d scheduler queue
-```
 
-フロント変更がある場合は上記 Vite ビルドを再実行。
+# フロント（CSS/JS の @vite）。package-lock / resources 変更時は必須。迷ったら毎回実行
+docker run --rm -v "$PWD/../Application:/app" -w /app node:22-bookworm \
+  bash -lc "npm ci && npm run build"
+```
 
 `scheduler` は `restart: unless-stopped` のため、compose 再作成後も自動起動する。止まっている場合:
 
@@ -290,6 +304,7 @@ php artisan queue:work --sleep=1 --tries=3 --timeout=90
 | 502 / 空応答 | `docker compose ps`、`php` / `nginx` ログ |
 | `scheduler` / `queue` が Restarting | ログに `vendor/autoload.php` → **手順 3 の Composer 未実施**。実施後 `docker compose up -d scheduler queue` |
 | `vendor does not exist and could not be created` | `www-data` に書込権なし。`docker compose exec -u root php composer install ...` のあと `chown` |
+| `Vite manifest not found`（`public/build/manifest.json`） | **手順 5** の `npm ci && npm run build` 未実施。`public/build/` は gitignore のため各環境でビルドが必要 |
 | `Class "Faker\Factory" not found`（db:seed） | 開発用フルシードは Faker 必須。本番は `ProductionBootstrapSeeder` を使う（`--no-dev` 可） |
 | `ADMIN_SEED_PASSWORD` 関連エラー | `Application/.env` に `ADMIN_SEED_PASSWORD`（10文字以上）を設定してから ProductionBootstrapSeeder を再実行 |
 | `file_put_contents(.../.env): Permission denied` | `key:generate` は必ず `-u root`。終了後 `chown www-data:www-data /var/www/html/.env` |

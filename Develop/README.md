@@ -31,7 +31,7 @@ docker compose up -d --build
 
 ## 初回アプリセットアップ
 
-`vendor` はリポジトリに含まれません。コンテナ起動後に Composer が必須です。
+`vendor/` と `public/build/` はリポジトリに含まれません。コンテナ起動後に **Composer** と **Vite ビルド**が必須です。
 
 ```bash
 cd Develop
@@ -45,6 +45,10 @@ docker compose exec -u root php chown -R www-data:www-data \
 docker compose exec -u root php php artisan key:generate
 docker compose exec -u root php php artisan migrate --seed
 docker compose exec -u root php chown www-data:www-data /var/www/html/.env
+
+# フロント（未実施だと Vite manifest not found）
+docker run --rm -v "$PWD/../Application:/app" -w /app node:22-bookworm \
+  bash -lc "npm ci && npm run build"
 
 docker compose up -d scheduler queue
 ```
