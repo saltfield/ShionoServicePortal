@@ -63,6 +63,7 @@ cp .env.example .env
 | `APP_DEBUG` | 本番は `false` |
 | `APP_KEY` | 下記 `key:generate` で生成 |
 | `APP_URL` | 公開 URL（リバースプロキシの HTTPS URL）。**メール本文のリンク／ボタンもこの値から生成**される |
+| `ADMIN_SEED_*` | 本番初回の `ProductionBootstrapSeeder` 用（`LOGIN_ID` / `PASSWORD` / `NAME` / `EMAIL`）。シード後は `PASSWORD` 削除推奨 |
 | `APP_TIMEZONE` | `Asia/Tokyo` |
 | `DB_HOST` | compose 内なら `mariadb` |
 | `DB_*` | `Develop/.env` の DB と一致させる |
@@ -110,13 +111,30 @@ docker compose exec -u root php chown -R www-data:www-data \
 
 `www-data` で `vendor does not exist and could not be created` と出たら、上記のとおり `-u root` を使ってください。
 
+> **注意:** `--no-dev` では `fakerphp/faker` が入らないため、開発用の `db:seed`（`DemoUserSeeder`）は失敗します。  
+> **本番初回は `ProductionBootstrapSeeder` を使ってください**（管理者1名のみ・Faker 不要・BPデモなし）。
+
 ### 4. アプリ初期化
 
 ```bash
 cd Develop
 docker compose exec -u www-data php php artisan key:generate
+# Permission denied の場合は -u root で実行し、あとで .env を chown
+
 docker compose exec -u www-data php php artisan migrate --force
-docker compose exec -u www-data php php artisan db:seed --force   # 初回のみ（IAM 等）
+
+# --- 本番初回シード（推奨）---
+# Application/.env に例:
+#   ADMIN_SEED_LOGIN_ID=ADMIN001
+#   ADMIN_SEED_PASSWORD=（10文字以上の初期パスワード）
+#   ADMIN_SEED_NAME=管理者
+#   ADMIN_SEED_EMAIL=admin@example.com
+docker compose exec -u root php php artisan db:seed \
+  --class=Database\\Seeders\\ProductionBootstrapSeeder --force
+# シード後、ADMIN_SEED_PASSWORD は .env から削除推奨
+
+# --- 開発のみ: デモ BP/カスタマー込み（要 composer install ※--no-dev なし）---
+# docker compose exec -u root php php artisan db:seed --force
 ```
 
 権限・キャッシュ:
@@ -266,6 +284,9 @@ php artisan queue:work --sleep=1 --tries=3 --timeout=90
 | 502 / 空応答 | `docker compose ps`、`php` / `nginx` ログ |
 | `scheduler` / `queue` が Restarting | ログに `vendor/autoload.php` → **手順 3 の Composer 未実施**。実施後 `docker compose up -d scheduler queue` |
 | `vendor does not exist and could not be created` | `www-data` に書込権なし。`docker compose exec -u root php composer install ...` のあと `chown` |
+| `Class "Faker\Factory" not found`（db:seed） | 開発用フルシードは Faker 必須。本番は `ProductionBootstrapSeeder` を使う（`--no-dev` 可） |
+| `ADMIN_SEED_PASSWORD` 関連エラー | `Application/.env` に `ADMIN_SEED_PASSWORD`（10文字以上）を設定してから ProductionBootstrapSeeder を再実行 |
+| `file_put_contents(.../.env): Permission denied` | `key:generate` を `-u root` で実行するか、ホストで `.env` を書き込み可にする |
 | `The "APP_NAME" variable is not set`（Compose WARN） | `Develop/.env` に `APP_NAME=SSP` を追加（または同期メモの `${APP_NAME}` をリテラルに変更） |
 | Permission denied (storage) | `chown -R www-data:www-data storage bootstrap/cache` |
 | 自動請求が動かない | `scheduler` 起動有無、設定の有効・日時、生成履歴 |
