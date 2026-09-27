@@ -139,6 +139,12 @@ it('allows bp and customer to update contract notes via http and hides foreign o
     expect(EntityNote::query()->where('visibility', 'shared')->where('subject_type', 'contract')->where('subject_id', $contract->id)->value('body'))
         ->toBe('共有テキスト');
 
+    $this->actingAs($fx['bpUser'], 'bp')
+        ->get(route('bp.contracts.show', ['contract' => $contract, 'tab' => 'history']))
+        ->assertOk()
+        ->assertSee('共有備考を更新')
+        ->assertSee('組織内備考を更新');
+
     $customerUser = User::factory()->customer($fx['customer'])->create([
         'login_id' => 'NOTECUST',
         'password' => 'Password123!',

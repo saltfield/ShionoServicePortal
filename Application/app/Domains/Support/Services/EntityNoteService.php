@@ -172,6 +172,14 @@ class EntityNoteService
             ],
         );
 
+        if ($subject instanceof Contract) {
+            $this->contracts->recordNoteHistory(
+                $actor,
+                $subject,
+                $visibility === ContractNoteVisibility::Shared ? '共有備考を更新' : '組織内備考を更新',
+            );
+        }
+
         return $note->load('updatedBy');
     }
 

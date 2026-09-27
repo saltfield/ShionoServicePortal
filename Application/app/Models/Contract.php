@@ -91,7 +91,7 @@ class Contract extends Model
 
     public function statusHistories(): HasMany
     {
-        return $this->hasMany(ContractStatusHistory::class);
+        return $this->hasMany(ContractStatusHistory::class)->orderBy('created_at')->orderBy('id');
     }
 
     public function applications(): HasMany

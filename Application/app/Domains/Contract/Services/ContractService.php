@@ -1580,6 +1580,11 @@ class ContractService
         $this->ensureContractScope($actor, $contract);
     }
 
+    public function recordNoteHistory(User $actor, Contract $contract, string $noteLabel): void
+    {
+        $this->recordStatus($contract, $contract->status, $contract->status ?? ContractStatus::Draft, $actor, $noteLabel);
+    }
+
     private function transition(Contract $contract, ContractStatus $to, User $actor, ?string $note): void
     {
         $from = $contract->status;

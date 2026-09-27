@@ -797,7 +797,14 @@
     @if ($activeTab === 'history')
         <ul class="mb-0">
             @forelse ($contract->statusHistories as $history)
-                <li class="small">{{ $history->created_at }} : {{ $history->from_status ?? '—' }} → {{ $history->to_status }} {{ $history->note }}</li>
+                <li class="small">
+                    {{ $history->created_at }} :
+                    @if ($history->from_status !== null && $history->from_status === $history->to_status)
+                        {{ $history->note ?: '記録' }}
+                    @else
+                        {{ $history->from_status ?? '—' }} → {{ $history->to_status }}{{ $history->note ? ' '.$history->note : '' }}
+                    @endif
+                </li>
             @empty
                 <li class="text-muted">履歴なし</li>
             @endforelse
