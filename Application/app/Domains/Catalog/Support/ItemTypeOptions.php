@@ -57,7 +57,8 @@ class ItemTypeOptions
             ->where(function (Builder $query) use ($includeTypeId) {
                 $query->where('is_active', true);
                 if ($includeTypeId !== null) {
-                    $query->orWhereKey($includeTypeId);
+                    // Eloquent Builder に orWhereKey は無いため id で OR する
+                    $query->orWhere($query->getModel()->getQualifiedKeyName(), $includeTypeId);
                 }
             });
     }

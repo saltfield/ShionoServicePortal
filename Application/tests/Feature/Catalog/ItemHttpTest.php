@@ -71,6 +71,80 @@ it('allows admin to create item via http', function () {
     $this->get(route('admin.items.index'))->assertOk()->assertSee('光回線月額');
 });
 
+it('allows admin to open item edit and update', function () {
+    $user = User::factory()->admin()->create([
+        'login_id' => 'ITEMEDITADMIN',
+        'password' => 'Password123!',
+        'must_change_password' => false,
+    ]);
+    app(RbacService::class)->assignRole($user, 'system_admin', RoleScope::System);
+
+    $type = \App\Models\ItemType::query()->create([
+        'name' => '編集用種別',
+        'message' => null,
+        'is_active' => true,
+        'owning_bp_id' => null,
+    ]);
+
+    $item = Item::factory()->create([
+        'name' => '編集前品目',
+        'item_type_id' => $type->id,
+        'billing_type' => BillingType::Running,
+        'partition_price' => 1000,
+        'recommended_price' => 2000,
+        'user_price' => 2500,
+    ]);
+
+    $this->actingAs($user, 'admin')
+        ->get(route('admin.items.edit', $item))
+        ->assertOk()
+        ->assertSee('編集前品目')
+        ->assertSee('編集用種別');
+
+    $this->actingAs($user, 'admin')
+        ->put(route('admin.items.update', $item), [
+            'name' => '編集後品目',
+            'billing_type' => BillingType::Running->value,
+            'item_type_id' => $type->id,
+            'partition_price' => 1100,
+            'recommended_price' => 2100,
+            'user_price' => 2600,
+            'tax_rate' => 10,
+            'is_active' => '1',
+        ])
+        ->assertRedirect(route('admin.items.show', $item))
+        ->assertSessionHas('status');
+
+    expect($item->fresh()->name)->toBe('編集後品目')
+        ->and((float) $item->fresh()->partition_price)->toBe(1100.0);
+});
+
+it('allows admin to open item edit when current item type is inactive', function () {
+    $user = User::factory()->admin()->create([
+        'login_id' => 'ITEMEDITINACTIVE',
+        'password' => 'Password123!',
+        'must_change_password' => false,
+    ]);
+    app(RbacService::class)->assignRole($user, 'system_admin', RoleScope::System);
+
+    $inactive = \App\Models\ItemType::query()->create([
+        'name' => '無効種別',
+        'message' => null,
+        'is_active' => false,
+        'owning_bp_id' => null,
+    ]);
+
+    $item = Item::factory()->create([
+        'name' => '無効種別付き品目',
+        'item_type_id' => $inactive->id,
+    ]);
+
+    $this->actingAs($user, 'admin')
+        ->get(route('admin.items.edit', $item))
+        ->assertOk()
+        ->assertSee('無効種別');
+});
+
 it('accepts only excel xml html for document templates', function () {
     $user = User::factory()->admin()->create([
         'login_id' => 'ITEMDOCADMIN',

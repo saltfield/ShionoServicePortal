@@ -118,6 +118,49 @@ it('lets bp upload own document template on catalog item', function () {
         ->and($doc->item_id)->toBe($fx['catalog']->id);
 });
 
+it('lets bp open and update owned item edit form', function () {
+    $fx = bpItemsFixture();
+
+    $type = \App\Models\ItemType::query()->create([
+        'name' => 'BP編集種別',
+        'message' => null,
+        'is_active' => true,
+        'owning_bp_id' => null,
+    ]);
+
+    $owned = app(CatalogPricingService::class)->createItem($fx['bpUser'], [
+        'name' => 'BP編集前',
+        'billing_type' => BillingType::Running->value,
+        'item_type_id' => $type->id,
+        'partition_price' => 800,
+        'recommended_price' => 1200,
+        'user_price' => 1500,
+        'owning_bp_id' => $fx['root']->id,
+    ]);
+
+    $this->actingAs($fx['bpUser'], 'bp')
+        ->get(route('bp.items.edit', $owned))
+        ->assertOk()
+        ->assertSee('BP編集前')
+        ->assertSee('BP編集種別');
+
+    $this->actingAs($fx['bpUser'], 'bp')
+        ->put(route('bp.items.update', $owned), [
+            'name' => 'BP編集後',
+            'billing_type' => BillingType::Running->value,
+            'item_type_id' => $type->id,
+            'partition_price' => 900,
+            'recommended_price' => 1300,
+            'user_price' => 1600,
+            'tax_rate' => 10,
+            'is_active' => 1,
+        ])
+        ->assertRedirect(route('bp.items.show', $owned))
+        ->assertSessionHas('status');
+
+    expect($owned->fresh()->name)->toBe('BP編集後');
+});
+
 it('rejects other bp owned item in contract draft', function () {
     $fx = bpItemsFixture();
     $seq = app(NumberSequenceService::class);
