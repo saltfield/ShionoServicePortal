@@ -298,3 +298,113 @@ it('runs scheduled batch after configured time once per billing month', function
     expect($run)->not->toBeNull()
         ->and($run->actor_user_id)->toBeNull();
 });
+
+it('generates invoices for a past month range scoped to bp tree, bp alone, or customer', function () {
+    $fx = monthlyBillingFixture();
+    $fx['contract']->forceFill(['first_billing_year_month' => '202506'])->save();
+
+    // 別系統の契約（範囲外になること）
+    $seq = app(NumberSequenceService::class);
+    $otherBp = app(BpHierarchyService::class)->createRoot($seq->next(PartnerCodePrefix::Bpn), 'Other Root');
+    $otherCustomer = Customer::query()->create([
+        'code' => $seq->next(PartnerCodePrefix::Cn),
+        'managing_bp_id' => $otherBp->id,
+        'name' => 'Other Customer',
+        'entity_type' => 'corporate',
+        'two_factor_mode' => TwoFactorMode::Optional,
+        'is_active' => true,
+    ]);
+    $otherSite = Site::query()->create([
+        'customer_id' => $otherCustomer->id,
+        'name' => '他社',
+        'billing_name' => '請求先',
+        'is_primary' => true,
+        'is_active' => true,
+    ]);
+    $otherUser = User::factory()->bp($otherBp)->create([
+        'login_id' => 'KBOTHER',
+        'password' => 'Password123!',
+        'must_change_password' => false,
+    ]);
+    app(RbacService::class)->assignRole($otherUser, 'bp_owner', RoleScope::Bp, $otherBp->id);
+    $otherItem = app(CatalogPricingService::class)->createItem($fx['admin'], [
+        'name' => '他系統月額',
+        'billing_type' => BillingType::Running->value,
+        'partition_price' => 1000,
+        'user_price' => 3000,
+        'tax_rate' => 10,
+    ]);
+    $otherContract = app(ContractService::class)->createDraft($otherUser, $otherSite, [$otherItem->id]);
+    $otherContract->items->first()->update(['unit_price' => 3000, 'partition_price' => 1000]);
+    $otherContract->forceFill([
+        'status' => ContractStatus::Activated,
+        'activated_at' => now(),
+        'first_billing_year_month' => '202506',
+        'auto_invoice_enabled' => true,
+        'billing_suspended' => false,
+    ])->save();
+
+    // 親BP単体では配下 leaf の契約は対象外
+    $rootOnly = app(MonthlyBillingService::class)->runRange(
+        '202506',
+        '202506',
+        ['type' => 'bp', 'id' => $fx['root']->id],
+        $fx['admin'],
+    );
+    expect($rootOnly['invoices'])->toBe(0)
+        ->and(Invoice::query()->where('contract_id', $fx['contract']->id)->count())->toBe(0);
+
+    // 親BP（配下含む）なら leaf 契約が対象
+    $treeStats = app(MonthlyBillingService::class)->runRange(
+        '202506',
+        '202508',
+        ['type' => 'bp_tree', 'id' => $fx['root']->id],
+        $fx['admin'],
+    );
+
+    expect($treeStats['scope']['type'])->toBe('bp_tree')
+        ->and($treeStats['months'])->toHaveCount(3)
+        ->and($treeStats['invoices'])->toBe(3)
+        ->and($treeStats['errors'])->toBe(0)
+        ->and(Invoice::query()->where('contract_id', $fx['contract']->id)->count())->toBe(3)
+        ->and(Invoice::query()->where('contract_id', $otherContract->id)->count())->toBe(0);
+
+    $again = app(MonthlyBillingService::class)->runRange(
+        '202508',
+        '202508',
+        ['type' => 'bp', 'id' => $fx['leaf']->id],
+        $fx['admin'],
+    );
+    expect($again['invoices'])->toBe(0)
+        ->and($again['errors'])->toBeGreaterThan(0);
+
+    $this->actingAs($fx['admin'], 'admin')
+        ->get(route('admin.billing-batch.edit'))
+        ->assertOk()
+        ->assertSee('BP（配下含む）')
+        ->assertSee('BP単体')
+        ->assertSee('カスタマー');
+
+    $this->actingAs($fx['admin'], 'admin')
+        ->post(route('admin.billing-batch.run-range'), [
+            'from_year_month' => '202509',
+            'to_year_month' => '202509',
+            'scope_type' => 'customer',
+            'customer_id' => $fx['customer']->id,
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('status');
+
+    expect(Invoice::query()->where('contract_id', $fx['contract']->id)->where('billing_year_month', '202509')->exists())->toBeTrue()
+        ->and(Invoice::query()->where('contract_id', $otherContract->id)->count())->toBe(0);
+});
+
+it('rejects inverted billing month range', function () {
+    expect(fn () => app(MonthlyBillingService::class)->yearMonthsBetween('202508', '202506'))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('requires valid scope type for range generation', function () {
+    expect(fn () => app(MonthlyBillingService::class)->normalizeScope(['type' => 'unknown']))
+        ->toThrow(InvalidArgumentException::class);
+});

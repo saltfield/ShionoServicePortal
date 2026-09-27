@@ -262,6 +262,7 @@ foreach (
                     Route::get('billing-batch', [BillingBatchSettingsController::class, 'edit'])->name('billing-batch.edit');
                     Route::put('billing-batch', [BillingBatchSettingsController::class, 'update'])->name('billing-batch.update');
                     Route::post('billing-batch/run', [BillingBatchSettingsController::class, 'run'])->name('billing-batch.run');
+                    Route::post('billing-batch/run-range', [BillingBatchSettingsController::class, 'runRange'])->name('billing-batch.run-range');
                     Route::get('billing-batch/runs/{run}', [BillingBatchSettingsController::class, 'showRun'])->name('billing-batch.runs.show');
 
                     Route::get('tickets/received', [InquiryController::class, 'received'])->name('tickets.received');

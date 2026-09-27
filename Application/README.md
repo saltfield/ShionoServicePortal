@@ -45,6 +45,9 @@ resources/views/{admin,bp,customer,auth,layouts}
 ## 請求バッチ（Phase 10）
 
 - スケジュール定義: `routes/console.php`
-- 手動: `php artisan billing:run-monthly --month=YYYYMM`
-- UI: `/admin/billing-batch`（履歴・作成請求一覧）
+- 手動（単月）: `php artisan billing:run-monthly --month=YYYYMM`
+- 手動（範囲・BP配下）: `php artisan billing:run-monthly --from=YYYYMM --to=YYYYMM --bp-tree=BPN...`
+- 手動（範囲・BP単体）: `php artisan billing:run-monthly --from=YYYYMM --to=YYYYMM --bp=BPN...`
+- 手動（範囲・CN）: `php artisan billing:run-monthly --from=YYYYMM --to=YYYYMM --customer=CN...`
+- UI: `/admin/billing-batch`（履歴・作成請求一覧・過去月一括）
 - **Scheduler コンテナ必須**（`Develop` の `scheduler` サービス）

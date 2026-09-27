@@ -10,6 +10,8 @@ use App\Domains\Iam\Services\AuditLogger;
 use App\Domains\Iam\Services\AuthorizationService;
 use App\Http\Controllers\Controller;
 use App\Models\BillingBatchRun;
+use App\Models\BusinessPartner;
+use App\Models\Customer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -33,6 +35,8 @@ class BillingBatchSettingsController extends Controller
             'schedule' => $schedule->getScheduleWithNextRun(),
             'dayModes' => BillingBatchDayMode::cases(),
             'recentRuns' => $recentRuns,
+            'businessPartners' => BusinessPartner::query()->orderBy('depth')->orderBy('code')->get(['id', 'code', 'name', 'depth']),
+            'customers' => Customer::query()->orderBy('code')->get(['id', 'code', 'name']),
         ]);
     }
 
@@ -102,6 +106,82 @@ class BillingBatchSettingsController extends Controller
             $stats['kickbacks'],
             $stats['skipped'],
             $stats['errors'],
+        ));
+    }
+
+    public function runRange(Request $request, AuthorizationService $authorization, MonthlyBillingService $monthly, AuditLogger $audit): RedirectResponse
+    {
+        $actor = $request->user('admin');
+        $authorization->authorize($actor, 'invoice.manage');
+
+        $validated = $request->validate([
+            'from_year_month' => ['required', 'string', 'regex:/^\d{6}$/'],
+            'to_year_month' => ['required', 'string', 'regex:/^\d{6}$/'],
+            'scope_type' => ['required', 'in:bp_tree,bp,customer'],
+            'business_partner_id' => ['required_if:scope_type,bp_tree,bp', 'nullable', 'integer', 'exists:business_partners,id'],
+            'customer_id' => ['required_if:scope_type,customer', 'nullable', 'integer', 'exists:customers,id'],
+        ]);
+
+        $scope = match ($validated['scope_type']) {
+            'customer' => ['type' => 'customer', 'id' => (int) $validated['customer_id']],
+            default => ['type' => $validated['scope_type'], 'id' => (int) $validated['business_partner_id']],
+        };
+
+        try {
+            $stats = $monthly->runRange(
+                $validated['from_year_month'],
+                $validated['to_year_month'],
+                $scope,
+                $actor,
+            );
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['scope_type' => $exception->getMessage()]);
+        }
+
+        $audit->log(
+            'billing',
+            'billing_batch.run_range',
+            $stats['errors'] > 0 ? 'failure' : 'success',
+            $actor,
+            meta: [
+                'from' => $stats['from'],
+                'to' => $stats['to'],
+                'scope' => $stats['scope'],
+                'months' => count($stats['months']),
+                'invoices' => $stats['invoices'],
+                'kickbacks' => $stats['kickbacks'],
+                'skipped' => $stats['skipped'],
+                'errors' => $stats['errors'],
+            ],
+        );
+
+        $monthSummaries = collect($stats['months'])
+            ->map(fn (array $month) => sprintf(
+                '%s(請求%d/KB%d/skip%d/err%d)',
+                $month['billing_year_month'],
+                $month['invoices'],
+                $month['kickbacks'],
+                $month['skipped'],
+                $month['errors'],
+            ))
+            ->implode('、');
+
+        $scopeLabel = match ($stats['scope']['type']) {
+            'bp_tree' => sprintf('BP（配下含む） %s（%s）', $stats['scope']['code'], $stats['scope']['name']),
+            'bp' => sprintf('BP単体 %s（%s）', $stats['scope']['code'], $stats['scope']['name']),
+            default => sprintf('CN %s（%s）', $stats['scope']['code'], $stats['scope']['name']),
+        };
+
+        return back()->with('status', sprintf(
+            '過去月の請求を生成しました（対象: %s / %s〜%s / 合計 請求 %d / キックバック %d / スキップ %d / エラー %d）。詳細: %s',
+            $scopeLabel,
+            $stats['from'],
+            $stats['to'],
+            $stats['invoices'],
+            $stats['kickbacks'],
+            $stats['skipped'],
+            $stats['errors'],
+            $monthSummaries,
         ));
     }
 

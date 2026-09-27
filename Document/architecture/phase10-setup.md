@@ -53,9 +53,20 @@
 ### 生成履歴 UI
 
 - 画面: `/admin/billing-batch`（自動請求設定）
+- **単月手動実行**と**過去月の範囲一括生成**（開始〜終了 YYYYMM）がある
 - 履歴: 成功／一部失敗／失敗バッジ、請求・KB・スキップ・エラー件数
 - 詳細: `/admin/billing-batch/runs/{run}` … 当該実行で作成した請求・キックバック一覧
 - 紐付け: `invoices.billing_batch_run_id` / `kickback_invoices.billing_batch_run_id`
+
+### 導入時の過去請求バックフィル
+
+1. 契約を Activated にし、`first_billing_year_month`（請求開始）を実際の開始月（例: `202506`）にする  
+2. 管理者 → 自動請求設定 → 「過去月の請求を生成」で **BP（配下含む） / BP単体 / カスタマー** と期間を指定して一括実行  
+3. CLI 例:  
+   - `php artisan billing:run-monthly --from=202506 --to=202508 --bp-tree=BPN0001`  
+   - `php artisan billing:run-monthly --from=202506 --to=202508 --bp=BPN0001`  
+   - `php artisan billing:run-monthly --from=202506 --to=202508 --customer=CN0001`  
+4. キックバックはカスタマー請求の **6ヶ月後**のバッチで生成される（例: 202506 分は 202512 実行時）
 
 ### テーブル（追加）
 
